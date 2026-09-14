@@ -69,7 +69,7 @@ CREATE TABLE reports (
   action         TEXT NOT NULL CHECK (action IN ('count_only', 'upload')),
   requested      TEXT,                    -- JSON [{name, max_bytes}] when action = upload
   upload_expires INTEGER,
-  uploaded       INTEGER NOT NULL DEFAULT 0,  -- bit set of stored artifacts
+  artifacts      TEXT NOT NULL DEFAULT '{}',  -- JSON {name: {bytes, sha256, uploaded_at}} of stored pieces
   completed_at   INTEGER,
   sample_stored  INTEGER
 );

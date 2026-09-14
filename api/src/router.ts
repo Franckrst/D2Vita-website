@@ -3,6 +3,7 @@
 import { handleClaim } from "./claims";
 import type { Env } from "./env";
 import { error, signResponse } from "./http";
+import { handleComplete, handleUpload } from "./uploads";
 
 export type Handler = (
   request: Request,
@@ -18,7 +19,11 @@ interface Route {
   handler: Handler;
 }
 
-const routes: Route[] = [{ method: "POST", pattern: /^\/v1\/claims$/, handler: handleClaim }];
+const routes: Route[] = [
+  { method: "POST", pattern: /^\/v1\/claims$/, handler: handleClaim },
+  { method: "PUT", pattern: /^\/v1\/reports\/([^/]+)\/artifacts\/([^/]+)$/, handler: handleUpload },
+  { method: "POST", pattern: /^\/v1\/reports\/([^/]+)\/complete$/, handler: handleComplete },
+];
 
 // Responses to the console are signed, errors included, so a hostile network
 // can neither forge a disable_until_unix nor trigger uploads.

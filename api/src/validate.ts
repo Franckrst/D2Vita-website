@@ -217,6 +217,32 @@ export function validateClaim(input: unknown): Validation<Claim> {
 }
 
 // ---------------------------------------------------------------------------
+// POST /v1/reports/{id}/complete: {"v":1,"artifacts":[…]}. The spec does not
+// fix the item shape: names ("crash_txt") and {name, bytes} objects are both
+// accepted. Every name must have been requested by the upload token.
+
+export function validateComplete(input: unknown, requested: readonly string[]): Validation<string[]> {
+  return run(() => {
+    const body = object(input, "", ["v", "artifacts"]);
+    if (body.v !== 1) fail("v", "must be 1");
+    const names: string[] = [];
+    array(ARTIFACT_NAMES.length, (item, path) => {
+      let name: unknown = item;
+      if (typeof item === "object" && item !== null) {
+        const o = object(item, path, ["name"], ["bytes"]);
+        if ("bytes" in o) integer(0, 0x7fffffff)(o.bytes, child(path, "bytes"));
+        name = o.name;
+        path = child(path, "name");
+      }
+      oneOf(requested)(name, path);
+      names.push(name as string);
+    })(body.artifacts, "artifacts");
+    if (new Set(names).size !== names.length) fail("artifacts", "duplicate artifact name");
+    return names;
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Public bug report (POST /v1/bugs).
 
 export interface BugInput {
