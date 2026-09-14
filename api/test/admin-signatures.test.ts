@@ -3,14 +3,14 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { handle } from "../src/router";
 import { admin, adminRequest, sendClaim, sigOf } from "./admin-helpers";
-import { BUILD_ID, haltClaim, hostFaultClaim, installId } from "./fixtures";
+import { BUILD_ID, haltClaim, haltFeatures, hostFaultClaim, installId } from "./fixtures";
 import { NOW, call, registerBuild, resetDatabase } from "./helpers";
 
 const OTHER_BUILD = "0.2.0+0123456789ab";
 
 const A = () => haltClaim(); // halt 1420
 const B = () => hostFaultClaim(); // host_fault eboot
-const C = () => haltClaim({ features: { code: 904, location: "Codec.cpp:1377", frames: ["Game+0x1"] } });
+const C = () => haltClaim({ features: haltFeatures({ code: 904, location: "Codec.cpp:1377", frames: ["Game+0x1"] }) });
 
 beforeEach(async () => {
   await resetDatabase();
@@ -93,7 +93,7 @@ describe("GET /v1/admin/signatures", () => {
   it("keeps a stable order for equal sort keys across pages", async () => {
     const ids: string[] = [];
     for (let i = 0; i < 5; i++) {
-      const claim = haltClaim({ features: { code: 100 + i, frames: [] } });
+      const claim = haltClaim({ features: haltFeatures({ code: 100 + i, frames: [] }) });
       await sendClaim(claim, NOW);
       ids.push(await sigOf(claim));
     }

@@ -1,12 +1,12 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { admin, adminRequest, sendClaim, sigOf } from "./admin-helpers";
-import { haltClaim, hostFaultClaim } from "./fixtures";
+import { haltClaim, haltFeatures, hostFaultClaim } from "./fixtures";
 import { NOW, call, registerBuild, resetDatabase, signatureRow } from "./helpers";
 
 const A = () => haltClaim();
 const B = () => hostFaultClaim();
-const C = () => haltClaim({ features: { code: 904, location: "Codec.cpp:1377", frames: [] } });
+const C = () => haltClaim({ features: haltFeatures({ code: 904, location: "Codec.cpp:1377", frames: [] }) });
 
 let a: string;
 let b: string;
@@ -81,7 +81,7 @@ describe("PATCH /v1/admin/signatures/{id}", () => {
     await patch(c, { merged_into: b });
     await patch(a, { merged_into: c }); // c is merged into b: a goes to b
     expect(await signatureRow(a)).toMatchObject({ merged_into: b });
-    const third = haltClaim({ features: { code: 1, frames: [] } });
+    const third = haltClaim({ features: haltFeatures({ code: 1, frames: [] }) });
     await sendClaim(third);
     const d = await sigOf(third);
     await patch(b, { merged_into: d }); // b's children follow b to d

@@ -2,7 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { canon, signatureId } from "../src/signature";
 import type { Claim } from "../src/types";
-import { BUILD_ID, haltClaim, hostFaultClaim, installId, ulid } from "./fixtures";
+import { BUILD_ID, haltClaim, haltFeatures, hostFaultClaim, installId, ulid } from "./fixtures";
 import { NOW, call, claimRequest, registerBuild, resetDatabase, signatureRow, signedJson } from "./helpers";
 
 const KiB = 1024;
@@ -134,13 +134,10 @@ describe("POST /v1/claims: deduplication (spec section 5.4)", () => {
 
     await resetDatabase();
     await registerBuild();
-    const withheld = hostFaultClaim({
-      artifacts: [
-        { name: "crash_log", bytes: 70 * KiB }, // above its cap: not requested
-        { name: "boot_progress", bytes: 1000 },
-      ],
-    });
-    const decision = await signedJson(await call(claimRequest(withheld)));
+    // A piece the console does not hold (the schema already refuses one above
+    // its cap, so a claim can only leave it out) is not requested.
+    const fewer = hostFaultClaim({ artifacts: [{ name: "boot_progress", bytes: 1000 }] });
+    const decision = await signedJson(await call(claimRequest(fewer)));
     expect(decision.upload.artifacts).toEqual([{ name: "boot_progress", max_bytes: 320 * KiB }]);
   });
 
@@ -280,14 +277,14 @@ describe("POST /v1/claims: deduplication (spec section 5.4)", () => {
   });
 
   it("counts claims of a merged signature on its root", async () => {
-    const childClaim = haltClaim({ features: { code: 904, location: "Codec.cpp:1377", frames: [] } });
+    const childClaim = haltClaim({ features: haltFeatures({ code: 904, location: "Codec.cpp:1377", frames: [] }) });
     const child = await sigOf(childClaim);
     const root = await sigOf(haltClaim());
     await call(claimRequest(haltClaim()));
     await call(claimRequest(childClaim));
     await env.DB.prepare("UPDATE signatures SET merged_into = ?1 WHERE id = ?2").bind(root, child).run();
 
-    const next = haltClaim({ features: { code: 904, location: "Codec.cpp:1377", frames: [] } });
+    const next = haltClaim({ features: haltFeatures({ code: 904, location: "Codec.cpp:1377", frames: [] }) });
     const decision = await signedJson(await call(claimRequest(next)));
     expect(decision.signature).toBe(root);
     expect(await signatureRow(root)).toMatchObject({ count: 2 });

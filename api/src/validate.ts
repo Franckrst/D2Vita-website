@@ -2,7 +2,19 @@
 // rejected everywhere ("champ inconnu = 400"). Errors carry the JSON path.
 
 import { CAP_NAMES } from "./limits";
-import { ARTIFACT_NAMES, CHANNELS, KINDS, REGIONS, type Claim, type Kind } from "./types";
+import {
+  ARTIFACT_MAX_BYTES,
+  ARTIFACT_NAMES,
+  CHANNELS,
+  EXIT_REASONS,
+  KINDS,
+  PLATFORM_MODELS,
+  REGIONS,
+  SEALED_MIN_BYTES,
+  type ArtifactName,
+  type Claim,
+  type Kind,
+} from "./types";
 
 export type Validation<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -80,6 +92,10 @@ function array(maxItems: number, item: Check): Check {
   };
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function charCount(text: string): number {
   let n = 0;
   for (const _ of text) n++;
@@ -97,69 +113,103 @@ function text(min: number, max: number, blankOk = false): Check {
 }
 
 // ---------------------------------------------------------------------------
-// Claim v1 (spec section 4.4).
+// Claim v1: contract/schemas/claim.v1.schema.json (design section 4.4).
+//
+// The Worker validates without a schema library, so every rule of that schema
+// is written out here. test/contract-claims.test.ts holds this code against the
+// schema itself: the 26 valid and 70 invalid contract vectors, a mutation sweep
+// comparing both on every mutant of every vector, and an equality check between
+// the patterns below and the patterns of the schema.
 
-const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-const INSTALL_ID = /^[0-9a-f]{32}$/;
-const BUILD_ID = /^[0-9]+\.[0-9]+\.[0-9]+\+[0-9a-f]{12}(-dirty)?$/;
 const VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/;
-const ADDRESS = /^[A-Za-z0-9_.]{1,32}\+0x[0-9a-f]{1,8}$/;
-const OFFSET = /^0x[0-9a-f]{1,8}$/;
-const MODULE = /^[A-Za-z0-9_.]{1,32}$/;
-const PLATFORM_FIELD = /^[A-Za-z0-9_.-]{1,32}$/;
 const SIGNATURE_ID = /^S[A-Z2-7]{15}$/;
 
-// Printable ASCII without "|" (the canon separator).
-function safeText(max: number): Check {
-  return pattern(new RegExp(`^[\\x20-\\x7b\\x7d\\x7e]{1,${max}}$`), `printable ASCII without '|' (1-${max} chars)`);
-}
+// Copied character for character from the schema; never edit one alone.
+export const CLAIM_PATTERNS = {
+  ReportId: /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/,
+  InstallId: /^[0-9a-f]{32}$/,
+  BuildId: /^[0-9]+\.[0-9]+\.[0-9]+\+[0-9a-f]{12}(-dirty)?$/,
+  Hex32: /^0x(0|[1-9a-f][0-9a-f]{0,7})$/,
+  ModuleName: /^[A-Za-z0-9_.]{1,32}$/,
+  Address: /^(Game|ABS|(?!(game|abs)\+)[a-z0-9_]{1,32})\+0x(0|[1-9a-f][0-9a-f]{0,7})$/,
+  SourceLocation: /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}:(0|[1-9][0-9]{0,9})$/,
+  ThreadName: /^[ -~]{0,32}$/,
+  ImportName: /^[A-Za-z0-9_.!@?$#]{1,128}$/,
+  RunnerState: /^[A-Za-z0-9_.-]{1,32}$/,
+  PlatformFw: /^([0-9]{1,2}\.[0-9]{2}|unknown)$/,
+} as const;
 
-const address = pattern(ADDRESS, "an address '<module>+0x<hex>'");
+const U32_MAX = 4294967295;
+const u32 = integer(0, U32_MAX);
+const address = pattern(CLAIM_PATTERNS.Address, "an address '<module>+0x<hex>'");
+const hex32 = pattern(CLAIM_PATTERNS.Hex32, "a 32-bit value '0x<lower-case hex>'");
 
 function buildId(value: unknown, path: string): void {
-  pattern(BUILD_ID, "a build id '<major>.<minor>.<patch>+<12 hex>[-dirty]'")(value, path);
-  if ((value as string).length > 64) fail(path, "is too long");
+  pattern(CLAIM_PATTERNS.BuildId, "a build id '<major>.<minor>.<patch>+<12 hex>[-dirty]'")(value, path);
+  if (charCount(value as string) > 64) fail(path, "is too long");
 }
 
-const codeLocation: Check = (value, path) => {
+function frames(maxItems: number): Check {
+  return array(maxItems, address);
+}
+
+// Host address: the module of a known region is the region name itself.
+const hostAddress: Check = (value, path) => {
   const o = object(value, path, ["region", "module", "offset"]);
   oneOf(REGIONS)(o.region, child(path, "region"));
-  nullable(pattern(MODULE, "a module name"))(o.module, child(path, "module"));
-  pattern(OFFSET, "a lower-case hex offset '0x…'")(o.offset, child(path, "offset"));
+  pattern(CLAIM_PATTERNS.ModuleName, "a module name")(o.module, child(path, "module"));
+  hex32(o.offset, child(path, "offset"));
+  if (o.region !== "sysmodule" && o.module !== o.region) {
+    fail(child(path, "module"), `must be '${String(o.region)}' for that region`);
+  }
 };
 
+// Every key is required (null means unknown).
 const FEATURES: Record<Kind, Record<string, Check>> = {
   halt: {
-    code: nullable(integer(0, 0xffffffff)),
-    location: nullable(safeText(128)),
-    frames: array(16, address),
+    code: u32,
+    location: nullable(pattern(CLAIM_PATTERNS.SourceLocation, "a source location 'File.cpp:line'")),
+    frames: frames(16),
   },
   guest_fault: {
-    exception: nullable(safeText(64)),
-    thread: nullable(oneOf(["main", "worker"])),
-    eip: nullable(address),
-    frames: array(16, address),
+    exception: nullable(hex32),
+    thread: oneOf(["main", "worker"]),
+    eip: address,
+    frames: frames(16),
   },
   host_fault: {
-    stop_reason: nullable(safeText(64)),
-    thread_name: nullable(safeText(64)),
-    pc: nullable(codeLocation),
-    lr: nullable(codeLocation),
-    guest_frames: array(8, address),
-    redaction: nullable(oneOf(["clean", "withheld"])),
+    stop_reason: nullable(hex32),
+    thread_name: nullable(pattern(CLAIM_PATTERNS.ThreadName, "at most 32 printable ASCII characters")),
+    pc: hostAddress,
+    lr: hostAddress,
+    guest_frames: frames(8),
+    redaction: oneOf(["clean", "withheld"]),
   },
   abnormal_exit: {
-    reason: nullable(safeText(64)),
-    code: nullable(integer(-0x80000000, 0xffffffff)),
-    import: nullable(safeText(128)),
-    frames: array(16, address),
+    reason: oneOf(EXIT_REASONS),
+    code: nullable(u32),
+    import: nullable(pattern(CLAIM_PATTERNS.ImportName, "an import name")),
+    frames: frames(16),
   },
   hang: {
-    stalled_beats: nullable(integer(0, 1_000_000)),
+    stalled_beats: integer(2, 1_000_000),
     eip: nullable(address),
-    runner_state: nullable(safeText(64)),
+    runner_state: nullable(pattern(CLAIM_PATTERNS.RunnerState, "a runner state")),
   },
 };
+
+// A hint is another kind of evidence found for the same run, always strictly
+// less severe than the kind itself (host_fault > halt > abnormal_exit >
+// guest_fault > hang).
+const HINTS: Record<Kind, readonly Kind[]> = {
+  host_fault: ["halt", "abnormal_exit", "guest_fault", "hang"],
+  halt: ["abnormal_exit", "guest_fault", "hang"],
+  abnormal_exit: ["guest_fault", "hang"],
+  guest_fault: ["hang"],
+  hang: [],
+};
+
+const MAX_HINTS = 4;
 
 const CLAIM_FIELDS = [
   "v",
@@ -177,39 +227,44 @@ const CLAIM_FIELDS = [
 
 export function validateClaim(input: unknown): Validation<Claim> {
   return run(() => {
-    if (typeof input !== "object" || input === null || Array.isArray(input)) fail("claim", "must be an object");
+    if (!isObject(input)) fail("claim", "must be an object");
     const c = object(input, "", CLAIM_FIELDS, ["redactions"]);
     if (c.v !== 1) fail("v", "must be 1");
-    pattern(ULID, "a 26-character Crockford ULID")(c.report_id, "report_id");
-    pattern(INSTALL_ID, "32 lower-case hex characters")(c.install_id, "install_id");
+    pattern(CLAIM_PATTERNS.ReportId, "a 26-character Crockford ULID")(c.report_id, "report_id");
+    pattern(CLAIM_PATTERNS.InstallId, "32 lower-case hex characters")(c.install_id, "install_id");
     buildId(c.build_id, "build_id");
     oneOf(CHANNELS)(c.channel, "channel");
 
     const platform = object(c.platform, "platform", ["model", "fw"]);
-    pattern(PLATFORM_FIELD, "a short identifier")(platform.model, "platform.model");
-    pattern(PLATFORM_FIELD, "a short identifier")(platform.fw, "platform.fw");
+    oneOf(PLATFORM_MODELS)(platform.model, "platform.model");
+    pattern(CLAIM_PATTERNS.PlatformFw, "a firmware 'X.YY' or 'unknown'")(platform.fw, "platform.fw");
 
     const session = object(c.session, "session", ["started_unix", "uptime_s", "online"]);
-    integer(0, Number.MAX_SAFE_INTEGER)(session.started_unix, "session.started_unix");
-    integer(0, Number.MAX_SAFE_INTEGER)(session.uptime_s, "session.uptime_s");
+    u32(session.started_unix, "session.started_unix");
+    nullable(u32)(session.uptime_s, "session.uptime_s");
     boolean(session.online, "session.online");
 
     oneOf(KINDS)(c.kind, "kind");
-    const rules = FEATURES[c.kind as Kind];
-    const features = object(c.features, "features", [], Object.keys(rules));
-    for (const [key, check] of Object.entries(rules)) {
-      if (key in features) check(features[key], child("features", key));
-    }
+    const kind = c.kind as Kind;
+    const rules = FEATURES[kind];
+    const features = object(c.features, "features", Object.keys(rules));
+    for (const [key, check] of Object.entries(rules)) check(features[key], child("features", key));
 
-    array(KINDS.length, oneOf(KINDS))(c.hints, "hints");
+    array(MAX_HINTS, oneOf(HINTS[kind]))(c.hints, "hints");
+    const hints = c.hints as string[];
+    if (new Set(hints).size !== hints.length) fail("hints", "duplicate hint");
 
     array(ARTIFACT_NAMES.length, (item, path) => {
       const a = object(item, path, ["name", "bytes"]);
       oneOf(ARTIFACT_NAMES)(a.name, child(path, "name"));
-      integer(0, 0x7fffffff)(a.bytes, child(path, "bytes"));
+      integer(SEALED_MIN_BYTES, ARTIFACT_MAX_BYTES[a.name as ArtifactName])(a.bytes, child(path, "bytes"));
     })(c.artifacts, "artifacts");
     const names = (c.artifacts as Array<{ name: string }>).map((a) => a.name);
     if (new Set(names).size !== names.length) fail("artifacts", "duplicate artifact name");
+    // Only a host_fault whose dump held no secret may offer it (section 4.5).
+    if (names.includes("dump") && !(kind === "host_fault" && features.redaction === "clean")) {
+      fail("artifacts", "only a host_fault with a clean dump may offer one");
+    }
 
     if ("redactions" in c) integer(0, 1_000_000)(c.redactions, "redactions");
     return input as Claim;

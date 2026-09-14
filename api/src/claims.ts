@@ -23,23 +23,12 @@ import {
 import { notify } from "./notify";
 import { RULES_VERSION, canon, signatureId } from "./signature";
 import { createUploadToken, type RequestedArtifact } from "./token";
-import type { ArtifactName, Channel, Claim, Kind } from "./types";
+import { ARTIFACT_MAX_BYTES, type ArtifactName, type Channel, type Claim, type Kind } from "./types";
 import { validateClaim } from "./validate";
 
 export const CLAIM_MAX_BYTES = 16 * 1024;
 export const LEASE_SECONDS = 1800;
 export const DEFAULT_DISABLE_SECONDS = 86400;
-
-const KiB = 1024;
-const MiB = 1024 * KiB;
-
-// Sealed size caps (spec section 4.5).
-export const ARTIFACT_MAX_BYTES: Record<ArtifactName, number> = {
-  dump: 2 * MiB,
-  crash_txt: 64 * KiB,
-  crash_log: 64 * KiB,
-  boot_progress: 320 * KiB,
-};
 
 // Pieces requested for each kind (spec section 4.5 "Envoyée pour").
 const WANTED: Record<Kind, readonly ArtifactName[]> = {

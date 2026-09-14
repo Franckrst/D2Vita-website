@@ -4,7 +4,7 @@ import { eraseInstall } from "../src/admin";
 import { installHash } from "../src/crypto";
 import { StatementBudget } from "../src/maintenance";
 import { admin, adminRequest, sendClaim, sigOf } from "./admin-helpers";
-import { BUILD_ID, bugBody, haltClaim, installId } from "./fixtures";
+import { bugBody, BUILD_ID, haltClaim, haltFeatures, installId } from "./fixtures";
 import {
   NOW,
   bytesOf,
@@ -146,7 +146,7 @@ describe("DELETE /v1/admin/installs/{install_id}", () => {
   it("works in bounded steps: a run out of statements is not done, and the next one finishes", async () => {
     await registerBuild();
     const x = installId();
-    for (const code of [1, 2, 3]) await storeSample(haltClaim({ install_id: x, features: { code, frames: [] } }));
+    for (const code of [1, 2, 3]) await storeSample(haltClaim({ install_id: x, features: haltFeatures({ code, frames: [] }) }));
     const hash = await installHash(env.INSTALL_HASH_KEY!, x);
 
     const partial = await eraseInstall(env, hash, new StatementBudget(7));

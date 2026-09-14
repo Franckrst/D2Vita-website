@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { sha256, toHex } from "../src/crypto";
 import { utcDay } from "../src/limits";
 import { createUploadToken } from "../src/token";
-import { haltClaim, hostFaultClaim } from "./fixtures";
+import { haltClaim, haltFeatures, hostFaultClaim } from "./fixtures";
 import {
   NOW,
   bytesOf,
@@ -110,7 +110,7 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
 
   it("refuses a token of another report, a missing token and another scheme", async () => {
     const a = await newUploadDecision();
-    const b = await newUploadDecision({ features: { code: 7, frames: [] } });
+    const b = await newUploadDecision({ features: haltFeatures({ code: 7, frames: [] }) });
     for (const req of [
       putRequest(b.reportId, "crash_txt", bytesOf(10), a.token),
       putRequest(a.reportId, "crash_txt", bytesOf(10), null),
@@ -294,7 +294,7 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
 
     // The refused attempt above did not consume the global budget: 600 used so far.
     await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cap:global_artifact_bytes', '1000')").run();
-    const other = await newUploadDecision({ features: { code: 8, frames: [] } });
+    const other = await newUploadDecision({ features: haltFeatures({ code: 8, frames: [] }) });
     expect((await call(putRequest(other.reportId, "crash_txt", bytesOf(600), other.token))).status).toBe(429);
     const global = await env.DB.prepare("SELECT n FROM rate_counters WHERE scope = 'bytes:global'").first();
     expect(global).toEqual({ n: 600 });
@@ -337,7 +337,7 @@ describe("POST /v1/reports/{id}/complete", () => {
 
   it("binds each answer to its report, so one cannot be replayed for another", async () => {
     const a = await newUploadDecision();
-    const b = await newUploadDecision({ features: { code: 9, frames: [] } });
+    const b = await newUploadDecision({ features: haltFeatures({ code: 9, frames: [] }) });
     await uploadAll(a);
     await uploadAll(b);
     const doneA = await call(completeRequest(a.reportId, a.token, { v: 1, artifacts: a.names }));
