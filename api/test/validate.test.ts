@@ -251,5 +251,10 @@ describe("admin payloads", () => {
     expectInvalid(validateSettingsPatch({ caps: { install_claims_per_day: -1 } }), "caps.install_claims_per_day");
     expectInvalid(validateSettingsPatch({ caps: { made_up: 1 } }), "caps.made_up");
     expectInvalid(validateSettingsPatch({ ip_salt: "x" }), "ip_salt");
+    // The settings come back as admin.v1#Settings, where disable_until_unix is
+    // a 32-bit time and caps is never empty.
+    expectInvalid(validateSettingsPatch({ disable_until_unix: 4294967296 }), "disable_until_unix");
+    expect(validateSettingsPatch({ disable_until_unix: 4294967295 }).ok).toBe(true);
+    expectInvalid(validateSettingsPatch({ caps: {} }), "caps");
   });
 });

@@ -222,6 +222,11 @@ the length of the sample lease).
   as `X-D2V-SHA256` on the PUT and on the admin download; R2 custom metadata
   carries `bytes` and `build_id`. R2 needs metadata before a streamed body
   starts, and bodies are never buffered.
+- Two refusals the contract does not describe, both about states it could not
+  represent honestly: a signature cannot become `fixed` without a
+  `fixed_in_version` (a regression could never be noticed afterwards), and
+  `merged_into` has to name a known signature that is not this one and creates
+  no cycle. Both answer 400 `invalid_payload`.
 - The claim is stored as received, `install_id` included, because
   `admin.v1#ReportDetail` returns it and the contract validates it against
   `claim.v1`, where `install_id` is required. Everything else uses the

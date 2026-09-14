@@ -441,9 +441,12 @@ export function validateSettingsPatch(input: unknown): Validation<SettingsPatch>
     const s = object(input, "", [], ["accepting", "disable_until_unix", "caps"]);
     requireNonEmpty(s);
     if ("accepting" in s) boolean(s.accepting, "accepting");
-    if ("disable_until_unix" in s) nullable(integer(0, Number.MAX_SAFE_INTEGER))(s.disable_until_unix, "disable_until_unix");
+    // The settings come back as admin.v1#Settings: a 32-bit time, and caps
+    // that name at least one of the ten.
+    if ("disable_until_unix" in s) nullable(u32)(s.disable_until_unix, "disable_until_unix");
     if ("caps" in s) {
       const caps = object(s.caps, "caps", [], CAP_NAMES);
+      if (Object.keys(caps).length === 0) fail("caps", "must name at least one cap");
       for (const [key, value] of Object.entries(caps)) integer(0, Number.MAX_SAFE_INTEGER)(value, child("caps", key));
     }
     return input as SettingsPatch;
