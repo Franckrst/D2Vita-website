@@ -121,6 +121,7 @@ function text(min: number, max: number, blankOk = false): Check {
 // comparing both on every mutant of every vector, and an equality check between
 // the patterns below and the patterns of the schema.
 
+// admin.v1#Version (at most 40 characters) and decision.v1#SignatureId.
 const VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 const SIGNATURE_ID = /^S[A-Z2-7]{15}$/;
 
@@ -272,26 +273,16 @@ export function validateClaim(input: unknown): Validation<Claim> {
 }
 
 // ---------------------------------------------------------------------------
-// POST /v1/reports/{id}/complete: {"v":1,"artifacts":[…]}. The spec does not
-// fix the item shape: names ("crash_txt") and {name, bytes} objects are both
-// accepted. Every name must have been requested by the upload token.
+// POST /v1/reports/{id}/complete: decision.v1#CompleteRequest, the names of the
+// pieces the console uploaded ({"v":1,"artifacts":["crash_txt",…]}).
 
-export function validateComplete(input: unknown, requested: readonly string[]): Validation<string[]> {
+export function validateComplete(input: unknown): Validation<string[]> {
   return run(() => {
     const body = object(input, "", ["v", "artifacts"]);
     if (body.v !== 1) fail("v", "must be 1");
-    const names: string[] = [];
-    array(ARTIFACT_NAMES.length, (item, path) => {
-      let name: unknown = item;
-      if (typeof item === "object" && item !== null) {
-        const o = object(item, path, ["name"], ["bytes"]);
-        if ("bytes" in o) integer(0, 0x7fffffff)(o.bytes, child(path, "bytes"));
-        name = o.name;
-        path = child(path, "name");
-      }
-      oneOf(requested)(name, path);
-      names.push(name as string);
-    })(body.artifacts, "artifacts");
+    array(ARTIFACT_NAMES.length, oneOf(ARTIFACT_NAMES))(body.artifacts, "artifacts");
+    const names = body.artifacts as string[];
+    if (names.length === 0) fail("artifacts", "must name at least one piece");
     if (new Set(names).size !== names.length) fail("artifacts", "duplicate artifact name");
     return names;
   });
@@ -325,22 +316,36 @@ export function validateBug(input: unknown): Validation<BugInput> {
 }
 
 // ---------------------------------------------------------------------------
-// Admin payloads.
+// Admin payloads: admin.v1#SignaturePatch, #BugPatch, #BuildRegistration and
+// #SettingsUpdate. What they set comes back in the answers, so the bounds are
+// those of the definitions that carry the values (Note, HttpsUrl, Version).
 
-function httpsUrl(value: unknown, path: string): void {
-  if (typeof value !== "string" || value.length > 512) fail(path, "must be an https URL (max 512 chars)");
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    fail(path, "must be an https URL");
-  }
-  if (url.protocol !== "https:") fail(path, "must be an https URL");
-}
+// admin.v1#HttpsUrl: https:// followed by printable ASCII without spaces.
+const HTTPS_URL = /^https:\/\/[!-~]+$/;
+const httpsUrl = pattern(HTTPS_URL, "an https URL");
+
+// admin.v1#Note: no control character except tab, line feed and return.
+const NOTE = /^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$/;
 
 function requireNonEmpty(o: Record<string, unknown>): void {
   if (Object.keys(o).length === 0) fail("body", "empty patch");
 }
+
+// admin.v1#Version is at most 40 characters, #HttpsUrl 300, #Note 2000.
+const version: Check = (value, path) => {
+  pattern(VERSION, "a version 'X.Y.Z'")(value, path);
+  if (charCount(value as string) > 40) fail(path, "is too long (max 40 characters)");
+};
+
+const boundedHttpsUrl: Check = (value, path) => {
+  httpsUrl(value, path);
+  if (charCount(value as string) > 300) fail(path, "is too long (max 300 characters)");
+};
+
+const note: Check = (value, path) => {
+  pattern(NOTE, "text without control characters")(value, path);
+  if (charCount(value as string) > 2000) fail(path, "is too long (max 2000 characters)");
+};
 
 export interface SignaturePatch {
   status?: "open" | "fixed" | "ignored";
@@ -348,7 +353,7 @@ export interface SignaturePatch {
   merged_into?: string | null;
   issue_url?: string | null;
   note?: string | null;
-  resample?: true;
+  resample?: boolean;
 }
 
 export function validateSignaturePatch(input: unknown): Validation<SignaturePatch> {
@@ -356,11 +361,11 @@ export function validateSignaturePatch(input: unknown): Validation<SignaturePatc
     const p = object(input, "", [], ["status", "fixed_in_version", "merged_into", "issue_url", "note", "resample"]);
     requireNonEmpty(p);
     if ("status" in p) oneOf(["open", "fixed", "ignored"])(p.status, "status");
-    if ("fixed_in_version" in p) nullable(pattern(VERSION, "a version 'X.Y.Z'"))(p.fixed_in_version, "fixed_in_version");
+    if ("fixed_in_version" in p) nullable(version)(p.fixed_in_version, "fixed_in_version");
     if ("merged_into" in p) nullable(pattern(SIGNATURE_ID, "a signature id"))(p.merged_into, "merged_into");
-    if ("issue_url" in p) nullable(httpsUrl)(p.issue_url, "issue_url");
-    if ("note" in p) nullable(text(0, 4000, true))(p.note, "note");
-    if ("resample" in p && p.resample !== true) fail("resample", "must be true");
+    if ("issue_url" in p) nullable(boundedHttpsUrl)(p.issue_url, "issue_url");
+    if ("note" in p) nullable(note)(p.note, "note");
+    if ("resample" in p) boolean(p.resample, "resample");
     return input as SignaturePatch;
   });
 }
@@ -368,16 +373,14 @@ export function validateSignaturePatch(input: unknown): Validation<SignaturePatc
 export interface BugPatch {
   status?: "open" | "fixed" | "ignored";
   issue_url?: string | null;
-  note?: string | null;
 }
 
 export function validateBugPatch(input: unknown): Validation<BugPatch> {
   return run(() => {
-    const p = object(input, "", [], ["status", "issue_url", "note"]);
+    const p = object(input, "", [], ["status", "issue_url"]);
     requireNonEmpty(p);
     if ("status" in p) oneOf(["open", "fixed", "ignored"])(p.status, "status");
-    if ("issue_url" in p) nullable(httpsUrl)(p.issue_url, "issue_url");
-    if ("note" in p) nullable(text(0, 4000, true))(p.note, "note");
+    if ("issue_url" in p) nullable(boundedHttpsUrl)(p.issue_url, "issue_url");
     return input as BugPatch;
   });
 }
@@ -392,7 +395,7 @@ export function validateBuildRegistration(input: unknown): Validation<BuildRegis
   return run(() => {
     const b = object(input, "", ["build_id", "version", "channel"]);
     buildId(b.build_id, "build_id");
-    pattern(VERSION, "a version 'X.Y.Z'")(b.version, "version");
+    version(b.version, "version");
     if ((b.build_id as string).split("+")[0] !== b.version) fail("version", "must be the version part of build_id");
     oneOf(CHANNELS)(b.channel, "channel");
     return input as BuildRegistration;

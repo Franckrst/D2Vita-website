@@ -136,37 +136,37 @@ describe("settings", () => {
     expect(settings.disable_until_unix).toBeNull();
     expect(settings.caps).toEqual(DEFAULT_CAPS);
     expect(settings.caps).toMatchObject({
-      install_claims: 3,
-      install_artifact_bytes: 3 * MiB,
-      ip_claims: 10,
-      ip_bugs: 3,
-      global_claims: 2000,
-      global_artifact_bytes: 300 * MiB,
-      global_new_signatures: 200,
-      global_bugs: 100,
+      install_claims_per_day: 3,
+      install_artifact_bytes_per_day: 3 * MiB,
+      ip_claims_per_day: 10,
+      ip_bugs_per_day: 3,
+      global_claims_per_day: 2000,
+      global_artifact_bytes_per_day: 300 * MiB,
+      global_new_signatures_per_day: 200,
+      global_bugs_per_day: 100,
     });
   });
 
   it("persists the kill switch and cap overrides", async () => {
-    await saveSettings(env.DB, { accepting: false, disable_until_unix: T + 3600, caps: { install_claims: 7 } });
+    await saveSettings(env.DB, { accepting: false, disable_until_unix: T + 3600, caps: { install_claims_per_day: 7 } });
     const settings = await loadSettings(env.DB);
     expect(settings.accepting).toBe(false);
     expect(settings.disable_until_unix).toBe(T + 3600);
-    expect(settings.caps.install_claims).toBe(7);
-    expect(settings.caps.ip_claims).toBe(10);
+    expect(settings.caps.install_claims_per_day).toBe(7);
+    expect(settings.caps.ip_claims_per_day).toBe(10);
     await saveSettings(env.DB, { accepting: true, disable_until_unix: null });
     const again = await loadSettings(env.DB);
     expect(again.accepting).toBe(true);
     expect(again.disable_until_unix).toBeNull();
-    expect(again.caps.install_claims).toBe(7);
+    expect(again.caps.install_claims_per_day).toBe(7);
   });
 
   it("raises the installation caps for dev and test builds only", () => {
     expect(installCaps(DEFAULT_CAPS, "release")).toEqual({ claims: 3, bytes: 3 * MiB });
     for (const channel of ["dev", "test"] as const) {
       const caps = installCaps(DEFAULT_CAPS, channel);
-      expect(caps.claims).toBe(DEFAULT_CAPS.install_claims_dev);
-      expect(caps.bytes).toBe(DEFAULT_CAPS.install_artifact_bytes_dev);
+      expect(caps.claims).toBe(DEFAULT_CAPS.prerelease_install_claims_per_day);
+      expect(caps.bytes).toBe(DEFAULT_CAPS.prerelease_install_artifact_bytes_per_day);
       expect(caps.claims).toBeGreaterThan(3);
       expect(caps.bytes).toBeGreaterThan(3 * MiB);
     }

@@ -128,7 +128,7 @@ describe("POST /v1/bugs", () => {
 
   it("applies the global daily bug cap", async () => {
     mockTurnstile({ success: true });
-    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cap:global_bugs', '2')").run();
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cap:global_bugs_per_day', '2')").run();
     expect((await call(bugRequest(bugBody(), { "cf-connecting-ip": "198.51.100.1" }))).status).toBe(201);
     expect((await call(bugRequest(bugBody(), { "cf-connecting-ip": "198.51.100.2" }))).status).toBe(201);
     expect((await call(bugRequest(bugBody(), { "cf-connecting-ip": "198.51.100.3" }))).status).toBe(429);
@@ -137,9 +137,10 @@ describe("POST /v1/bugs", () => {
   it("refuses a request from another origin without calling Turnstile", async () => {
     const fetchMock = mockTurnstile({ success: true });
     const res = await call(bugRequest(bugBody(), { origin: "https://evil.example" }));
-    expect(res.status).toBe(403);
+    // The contract has no code for a refused origin: invalid_payload, 400.
+    expect(res.status).toBe(400);
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
-    expect(await res.json()).toMatchObject({ error: "origin_not_allowed" });
+    expect(await res.json()).toMatchObject({ error: "invalid_payload" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

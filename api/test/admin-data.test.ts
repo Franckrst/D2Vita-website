@@ -11,32 +11,38 @@ beforeEach(async () => {
 });
 
 describe("GET /v1/admin/reports/{id}", () => {
-  it("returns the full claim and the decision", async () => {
+  it("returns the claim as received and what happened to it", async () => {
     const claim = haltClaim({ redactions: 2 });
     const decision = await sendClaim(claim);
     const res = await admin("GET", `/v1/admin/reports/${claim.report_id}`);
     expect(res.status).toBe(200);
-    // Only the pseudonym is stored (spec section 5.6): the raw install_id is dropped.
-    const { install_id: _dropped, ...storedClaim } = claim;
-    expect(res.body.report).toEqual({
+    // admin.v1#ReportDetail: the claim must still validate against claim.v1,
+    // so it is kept whole, install_id included; every counter and every link
+    // uses the install_hash pseudonym instead.
+    expect(res.body).toEqual({
+      v: 1,
       report_id: claim.report_id,
       signature: decision.signature,
-      raw_signature: decision.signature,
       install_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
-      build_id: claim.build_id,
-      channel: "release",
-      kind: "halt",
-      received_at: NOW,
+      received_unix: NOW,
+      rules_version: 1,
       action: "upload",
-      claim: storedClaim,
-      decision,
-      requested: decision.upload.artifacts,
-      upload_expires: NOW + 1800,
-      artifacts: {},
-      completed_at: null,
-      sample_stored: null,
+      completed_unix: null,
+      claim,
+      artifacts: [],
     });
-    expect(JSON.stringify(res.body)).not.toContain(claim.install_id as string);
+  });
+
+  it("lists the stored pieces of a completed report", async () => {
+    const { decision, pieces } = await storeSample(haltClaim());
+    const res = await admin("GET", `/v1/admin/reports/${decision.report_id}`);
+    expect(res.body.completed_unix).toBe(NOW);
+    expect(res.body.artifacts).toContainEqual({
+      name: "crash_log",
+      bytes: pieces.crash_log!.byteLength,
+      sha256: toHex(await sha256(pieces.crash_log!)),
+      stored_unix: NOW,
+    });
   });
 
   it("answers 404 for an unknown or malformed id", async () => {
@@ -99,9 +105,7 @@ describe("admin bugs", () => {
       lang: "fr",
       status: "fixed",
       issue_url: null,
-      note: null,
-      created_at: NOW - 100,
-      updated_at: NOW - 100,
+      created_unix: NOW - 100,
     });
     const open = await admin("GET", "/v1/admin/bugs?status=open&limit=1");
     expect(open.body.items.map((b: any) => b.id)).toEqual(["BCCCCCCCCCCCCCCCC"]);
@@ -115,12 +119,12 @@ describe("admin bugs", () => {
     await seedBugs();
     const one = await admin("GET", "/v1/admin/bugs/BAAAAAAAAAAAAAAAA");
     expect(one.status).toBe(200);
-    expect(one.body.bug).toMatchObject({ id: "BAAAAAAAAAAAAAAAA", status: "open" });
+    expect(one.body).toMatchObject({ id: "BAAAAAAAAAAAAAAAA", status: "open" });
 
     const url = "https://github.com/Franckrst/D2Vita/issues/7";
-    const patched = await admin("PATCH", "/v1/admin/bugs/BAAAAAAAAAAAAAAAA", { status: "fixed", issue_url: url, note: "dup" }, NOW + 5);
+    const patched = await admin("PATCH", "/v1/admin/bugs/BAAAAAAAAAAAAAAAA", { status: "fixed", issue_url: url }, NOW + 5);
     expect(patched.status).toBe(200);
-    expect(patched.body.bug).toMatchObject({ status: "fixed", issue_url: url, note: "dup", updated_at: NOW + 5 });
+    expect(patched.body).toMatchObject({ status: "fixed", issue_url: url });
     expect((await admin("PATCH", "/v1/admin/bugs/BAAAAAAAAAAAAAAAA", { title: "x" })).status).toBe(400);
     expect((await admin("GET", "/v1/admin/bugs/BZZZZZZZZZZZZZZZZ")).status).toBe(404);
     expect((await admin("PATCH", "/v1/admin/bugs/BZZZZZZZZZZZZZZZZ", { status: "fixed" })).status).toBe(404);

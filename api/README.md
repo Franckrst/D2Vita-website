@@ -57,7 +57,16 @@ Each test file gets its own D1 database with `migrations/` applied
 (`test/apply-migrations.ts`) and a local R2 bucket. Throwaway secrets are
 generated for every run in `vitest.config.ts` (an Ed25519 key pair for response
 signatures, an admin token, HMAC keys). Outbound `fetch` (Turnstile, Telegram)
-is mocked. The suite covers, among others: a new signature gets `upload`, a
+is mocked. Ajv 2020 (a test dependency, never shipped in the Worker) compiles
+the four contract schemas, and `test/helpers.ts` validates **every** answer a
+test receives: the definition of its route for a success,
+`admin.v1#ErrorBody` with the documented status for a failure, plus the
+signature and the binding rules of the console routes. `test/contract-*.test.ts`
+add the vectors: 26 signature canons and ids, 70 refused claims, 9 response
+signatures and 5 that must not verify, one case per error code and one per
+answer body of the contract.
+
+The suite covers, among others: a new signature gets `upload`, a
 known one `count_only`; **30 simultaneous claims of a new signature produce
 exactly one upload decision** (atomic conditional `UPDATE`; mutation-checked);
 a replay returns the identical signed decision without counting; every cap
@@ -101,18 +110,27 @@ at a local server with `D2_CRASHREPORT_URL`.
 
 ## API v1
 
-All JSON bodies carry `"v": 1`. Errors are `{"v":1,"error":"<code>","message":"…"}`
-plus `retry_after_s` (429) or `disable_until_unix` (503).
+`../contract` is the authority on every byte on the wire: JSON schemas,
+signature rules, sealed format and vectors. The tests hold this Worker against
+it — the signature and response-signature vectors, the valid and invalid claim
+vectors plus a mutation sweep of the claim validator, and **every answer of
+every test** validated with Ajv 2020 in strict mode (`test/contract.ts`,
+`test/contract-*.test.ts`). What follows repeats the contract for a reader; if
+the two ever disagree, the contract is right.
 
-Console answers are bound to their request so that a signed answer captured
-from one report cannot be replayed to a console for another: `report_id` is in
-every decision, in every answer to a valid claim (400 header mismatch, 403
-`unknown_build`, 429), and in every answer past a valid upload token (plus
-`name` on piece routes once the piece is known to be requested). Answers to
-requests that prove nothing (invalid claim, missing or bad token, 413 before the
-token is checked, 503 kill switch) are not bound: anyone could obtain them for
-any report id. The console should only act on a bound answer whose `report_id`
-(and `name`) match its request.
+All JSON bodies carry `"v": 1`. Errors are `{"v":1,"error":"<code>","message":"…"}`
+with the thirteen codes of `admin.v1#ErrorBody` and their statuses, plus
+`retry_after_s` (429) or `disable_until_unix` (503).
+
+Console answers name the request they answer, so that a signed answer captured
+from one report cannot be replayed to a console waiting for another:
+`report_id` is in every decision, in every answer to a valid claim (400 header
+mismatch, 403 `unknown_build`, 429), and in every answer on a piece route whose
+path parameters are valid — with `artifact` (the piece name) in the errors of a
+PUT, and `name` in its 201. Answers to a request that names no valid report
+(an invalid claim, a malformed path, 413 or 503 before the claim is read) are
+not bound: there is nothing to name. The console acts on a bound answer only
+when `report_id` (and the piece name) match its own request.
 
 ### Console
 
@@ -123,8 +141,8 @@ Requests carry `X-D2V-Client: d2vita/<build_id>` and `X-D2V-Install: <install_id
 | Method | Path | Answers |
 |---|---|---|
 | POST | `/v1/claims` | `200` decision · `400 invalid_payload` · `403 unknown_build` · `413` · `429 rate_limited` · `503 not_accepting` |
-| PUT | `/v1/reports/{report_id}/artifacts/{name}` | `201 {report_id, name, bytes, sha256}` · `400` (body shorter/longer than declared, or cut off) · `403 bad_token` · `409 exists` · `413` · `429` · `500 storage_unavailable` (R2 failed: retry later) |
-| POST | `/v1/reports/{report_id}/complete` | `200 {"report_id":…,"sample_stored":bool}` · `400` · `403 bad_token` · `409 incomplete` (`missing`) |
+| PUT | `/v1/reports/{report_id}/artifacts/{name}` | `201 {report_id, name, bytes}` and `X-D2V-SHA256` · `400 invalid_payload` (bad path, body shorter/longer than declared or cut off, fewer than 88 bytes) · `403 bad_token` · `409 exists` · `413` · `429` · `500 internal_error` (R2 failed: retry later) |
+| POST | `/v1/reports/{report_id}/complete` | `200 {"report_id":…,"sample_stored":bool}` · `400 invalid_payload` · `403 bad_token` · `409 incomplete` |
 
 Decision (`action` is `upload` or `count_only`; `upload` is `null` for `count_only`):
 
@@ -145,33 +163,39 @@ the length of the sample lease).
 
 | Method | Path | Answers |
 |---|---|---|
-| POST | `/v1/bugs` | `201 {"id":"B…"}` · `400` · `403 turnstile` · `403 origin_not_allowed` · `413` · `429` |
+| POST | `/v1/bugs` | `201 {"id":"B…"}` · `400 invalid_payload` (bad body, or an `Origin` that is not the site) · `403 turnstile` · `413` · `429` |
 | OPTIONS | `/v1/bugs` | CORS preflight (`ALLOWED_ORIGIN` only) |
 
 ### Admin (`Authorization: Bearer <token>`)
 
 | Method | Path | Role |
 |---|---|---|
-| GET | `/v1/admin/signatures?status=&kind=&build=&sort=count\|last_seen&limit=&cursor=` | list (`items`, `next_cursor`) |
-| GET | `/v1/admin/signatures/{id}` | detail: per-build counters, distinct consoles, merged children, sample, 20 recent claims |
+| GET | `/v1/admin/signatures?status=&kind=&build=&sort=count\|last_seen&limit=&cursor=` | `admin.v1#SignatureList` (`limit` is an extension: 1 to 200, 50 by default) |
+| GET | `/v1/admin/signatures/{id}` | `admin.v1#SignatureDetail`: per-build counters, distinct consoles, sample and lease, 20 recent claims |
 | PATCH | `/v1/admin/signatures/{id}` | `status` (`open`/`fixed`/`ignored`), `fixed_in_version`, `merged_into`, `issue_url`, `note`, `resample: true` |
-| GET | `/v1/admin/reports/{id}` | stored claim and decision |
+| GET | `/v1/admin/reports/{id}` | `admin.v1#ReportDetail`: the stored claim and what happened to it |
 | GET | `/v1/admin/artifacts/{report_id}/{name}` | sealed bytes (`X-D2V-SHA256`) |
-| GET | `/v1/admin/bugs?status=&limit=&cursor=`, `/v1/admin/bugs/{id}` | bug reports |
-| PATCH | `/v1/admin/bugs/{id}` | `status`, `issue_url`, `note` |
-| POST | `/v1/admin/builds` | `{build_id, version, channel}` (201 created, 200 updated) |
-| DELETE | `/v1/admin/installs/{install_id}` | erase the claims and pieces of one installation: `200 {done: true, deleted_reports, deleted_artifacts}`, or `202 {done: false, …}` when the run hit its D1 statement budget — **call again until it answers 200** (counts are per call) |
-| GET | `/v1/admin/stats` | today's global quota use, totals, `database_bytes`, settings |
-| PUT | `/v1/admin/settings` | `{accepting, disable_until_unix, caps: {…}}` |
+| GET | `/v1/admin/bugs?status=&limit=&cursor=`, `/v1/admin/bugs/{id}` | `admin.v1#BugList`, `admin.v1#BugDetail` |
+| PATCH | `/v1/admin/bugs/{id}` | `status`, `issue_url` |
+| POST | `/v1/admin/builds` | `{build_id, version, channel}` -> `admin.v1#BuildRecord` (201 created, 200 updated) |
+| DELETE | `/v1/admin/installs/{install_id}` | erase the claims and pieces of one installation: `200 admin.v1#ForgetInstallResult`, or the same body with **202** when the run hit its D1 statement budget — call again until it answers 200 (counts are per call) |
+| GET | `/v1/admin/stats` | `admin.v1#Stats`: today's global quota use and the kill switch |
+| PUT | `/v1/admin/settings` | `admin.v1#SettingsUpdate` -> `admin.v1#Settings` |
 
 ### Choices made where the design left room
 
-- A missing `Content-Length` is answered **413** `length_required` on every
-  route with a body (claims, uploads, complete, bugs, admin writes).
+- A missing `Content-Length` is answered **413** `payload_too_large` on every
+  route with a body (claims, uploads, complete, bugs, admin writes), the code
+  the contract gives that case.
 - `X-D2V-Client` and `X-D2V-Install` are required on `/v1/claims` and must
   match `build_id` and `install_id` of the claim (400 otherwise).
-- The body of `complete` may list names (`["crash_log"]`) or objects
-  (`[{"name":"crash_log","bytes":123}]`); every name must have been requested.
+- The body of `complete` is `decision.v1#CompleteRequest`: one to four piece
+  names (`{"v":1,"artifacts":["crash_log"]}`). What decides completion is the
+  decision: every piece it asked for has to be stored, whatever the body lists.
+- A `PUT` shorter than 88 bytes is `400 invalid_payload`: no D2VSEAL1 object is
+  that small (72-byte header plus one 16-byte tag).
+- A bug report whose `Origin` is not the site is `400 invalid_payload`: the
+  contract has no code for a refused origin.
 - `host_fault` with a PC region `unknown` is not in the rules table; it is
   grouped per build as `hfault_unknown|<build_id>|<pc.offset>|<lr.offset>`.
 - The claim schema accepts an optional top-level `redactions` count. Feature
@@ -183,13 +207,18 @@ the length of the sample lease).
   bytes meanwhile, the piece is deleted and the answer is 429). A failed attempt
   costs nothing, so a console can retry a piece cut off by a Wi-Fi drop within
   its 3 MiB, and repeated failures write nothing to D1. A storage failure is a
-  `500 storage_unavailable`, not a 400, and not a 503, which the spec reserves
-  for the kill switch (`not_accepting` with `disable_until_unix`).
+  `500 internal_error`, not a 400, and not a 503, which the spec reserves for
+  the kill switch (`not_accepting` with `disable_until_unix`).
 - The SHA-256 of a piece is recorded in D1 (`reports.artifacts`) and returned
-  as `X-D2V-SHA256`; R2 custom metadata carries `bytes` and `build_id`. R2 needs
-  metadata before a streamed body starts, and bodies are never buffered.
-- Only `install_hash` is stored; the raw `install_id` is removed from the
-  stored claim.
+  as `X-D2V-SHA256` on the PUT and on the admin download; R2 custom metadata
+  carries `bytes` and `build_id`. R2 needs metadata before a streamed body
+  starts, and bodies are never buffered.
+- The claim is stored as received, `install_id` included, because
+  `admin.v1#ReportDetail` returns it and the contract validates it against
+  `claim.v1`, where `install_id` is required. Everything else uses the
+  pseudonym `install_hash = HMAC(INSTALL_HASH_KEY, install_id)`: counters,
+  distinct-console counts, links and erasure. Claims are deleted after 180
+  days.
 - Rate limits use the channel of the **registered** build, not the one claimed.
   Counters are consumed most specific first and stop at the first refusal.
 - `503` without an end date set by the admin answers `disable_until_unix = now + 24 h`.
@@ -209,11 +238,11 @@ the length of the sample lease).
 
 | Cap | Default |
 |---|---|
-| `install_claims` / `install_artifact_bytes` | 3 / 3 MiB per day |
-| `install_claims_dev` / `install_artifact_bytes_dev` (dev/test builds) | 50 / 64 MiB per day |
-| `ip_claims` / `ip_bugs` | 10 / 3 per day, per IPv4 address or IPv6 /48 (claims) or /64 (bugs) |
-| `global_claims` / `global_artifact_bytes` | 2000 / 300 MiB per day |
-| `global_new_signatures` / `global_bugs` | 200 / 100 per day |
+| `install_claims_per_day` / `install_artifact_bytes_per_day` | 3 / 3 MiB per day |
+| `prerelease_install_claims_per_day` / `prerelease_install_artifact_bytes_per_day` (dev and test builds) | 50 / 64 MiB per day |
+| `ip_claims_per_day` / `ip_bugs_per_day` | 10 / 3 per day, per IPv4 address or IPv6 /48 (claims) or /64 (bugs) |
+| `global_claims_per_day` / `global_artifact_bytes_per_day` | 2000 / 300 MiB per day |
+| `global_new_signatures_per_day` / `global_bugs_per_day` | 200 / 100 per day |
 
 D1 rows written per claim, measured with the local simulator: 10 for a known
 signature from a known console, 12 from a new console, 17 for a new signature

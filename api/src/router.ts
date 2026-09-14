@@ -20,7 +20,7 @@ import { handleBug, handleBugPreflight } from "./bugs";
 import { handleClaim } from "./claims";
 import type { Env } from "./env";
 import { error, signResponse } from "./http";
-import { handleComplete, handleUpload } from "./uploads";
+import { handleComplete, handleUpload, pathBinding } from "./uploads";
 
 export type Handler = (
   request: Request,
@@ -74,11 +74,11 @@ async function dispatch(request: Request, env: Env, ctx: ExecutionContext, now: 
     allowed.push(route.method);
   }
   if (allowed.length > 0) {
-    const response = error(405, "method_not_allowed", "Method not allowed");
+    const response = error("method_not_allowed", "Method not allowed");
     response.headers.set("allow", allowed.join(", "));
     return response;
   }
-  return error(404, "not_found", "No such route");
+  return error("not_found", "No such route");
 }
 
 export async function handle(request: Request, env: Env, ctx: ExecutionContext, now: number): Promise<Response> {
@@ -89,13 +89,14 @@ export async function handle(request: Request, env: Env, ctx: ExecutionContext, 
     response = await dispatch(request, env, ctx, now, path);
   } catch (e) {
     console.error("unhandled error:", e instanceof Error ? e.message : String(e));
-    response = error(500, "internal", "Internal error");
+    // Even an unexpected failure on a piece route names the report it answers.
+    response = error("internal_error", "Internal error", pathBinding(path));
   }
   if (!isConsolePath(path)) return response;
   try {
     return await signResponse(env, response);
   } catch (e) {
     console.error("response signing failed:", e instanceof Error ? e.message : String(e));
-    return error(500, "internal", "Internal error");
+    return error("internal_error", "Internal error");
   }
 }

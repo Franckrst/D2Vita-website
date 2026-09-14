@@ -144,17 +144,17 @@ export async function handleClaim(request: Request, env: Env, ctx: ExecutionCont
   if (!settings.accepting) return notAccepting(settings, now);
 
   const validation = validateClaim(body.value);
-  if (!validation.ok) return error(400, "invalid_payload", validation.error);
+  if (!validation.ok) return error("invalid_payload", validation.error);
   const claim = validation.value;
   // Answers to a valid claim are bound to its report (decisions already are).
   const bound = { report_id: claim.report_id };
   const headerError = consoleHeaderError(request, claim);
-  if (headerError) return error(400, "invalid_payload", headerError, bound);
+  if (headerError) return error("invalid_payload", headerError, bound);
 
   const build = await env.DB.prepare("SELECT build_id, version, channel FROM builds WHERE build_id = ?1")
     .bind(claim.build_id)
     .first<BuildRow>();
-  if (!build) return error(403, "unknown_build", "This build is not registered", bound);
+  if (!build) return error("unknown_build", "This build is not registered", bound);
 
   const install = await installHash(requireSecret(env.INSTALL_HASH_KEY, "INSTALL_HASH_KEY"), claim.install_id);
 
@@ -164,7 +164,7 @@ export async function handleClaim(request: Request, env: Env, ctx: ExecutionCont
     .first<{ install_hash: string; decision: string }>();
   if (previous) {
     if (previous.install_hash !== install) {
-      return error(400, "invalid_payload", "report_id is already used by another installation", bound);
+      return error("invalid_payload", "report_id is already used by another installation", bound);
     }
     return jsonText(previous.decision);
   }
@@ -180,11 +180,11 @@ export async function handleClaim(request: Request, env: Env, ctx: ExecutionCont
   const perInstall = installCaps(settings.caps, build.channel);
   const checks: LimitCheck[] = [
     { scope: SCOPE.installClaims, subject: install, amount: 1, cap: perInstall.claims },
-    { scope: SCOPE.ipClaims, subject: ipSubject, amount: 1, cap: settings.caps.ip_claims },
-    { scope: SCOPE.globalClaims, subject: "*", amount: 1, cap: settings.caps.global_claims },
+    { scope: SCOPE.ipClaims, subject: ipSubject, amount: 1, cap: settings.caps.ip_claims_per_day },
+    { scope: SCOPE.globalClaims, subject: "*", amount: 1, cap: settings.caps.global_claims_per_day },
   ];
   if (!target.head) {
-    checks.push({ scope: SCOPE.globalNewSignatures, subject: "*", amount: 1, cap: settings.caps.global_new_signatures });
+    checks.push({ scope: SCOPE.globalNewSignatures, subject: "*", amount: 1, cap: settings.caps.global_new_signatures_per_day });
   }
   if (await consumeAll(env.DB, day, checks)) return rateLimited(now, bound);
 
@@ -243,8 +243,9 @@ async function ingest(
   const mine = "EXISTS (SELECT 1 FROM reports WHERE report_id = ?1 AND ingest_nonce = ?2)";
   const statements: D1PreparedStatement[] = [];
 
-  // Only the pseudonym install_hash is stored, never the raw install_id.
-  const { install_id: _notStored, ...storedClaim } = claim;
+  // The claim is kept as it was received: admin.v1#ReportDetail returns it and
+  // the contract validates it against claim.v1, where install_id is required.
+  // The pseudonym install_hash is what every counter and every link uses.
 
   statements.push(
     db
@@ -254,7 +255,7 @@ async function ingest(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'count_only')
          ON CONFLICT (report_id) DO NOTHING`,
       )
-      .bind(claim.report_id, nonce, sig, rawId, install, claim.build_id, build.channel, claim.kind, now, JSON.stringify(storedClaim), countOnly),
+      .bind(claim.report_id, nonce, sig, rawId, install, claim.build_id, build.channel, claim.kind, now, JSON.stringify(claim), countOnly),
   );
 
   const regressionIndex = statements.length;

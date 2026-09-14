@@ -10,19 +10,20 @@ import type { SettingsPatch } from "./validate";
 
 const MiB = 1024 * 1024;
 
-// Initial values of the adjustable caps (PUT /v1/admin/settings overrides them).
+// Initial values of the adjustable caps (PUT /v1/admin/settings overrides
+// them). The names are those of admin.v1#Caps.
 export const DEFAULT_CAPS = {
-  install_claims: 3,
-  install_artifact_bytes: 3 * MiB,
+  install_claims_per_day: 3,
+  install_artifact_bytes_per_day: 3 * MiB,
   // dev/test builds are not distributed: raised caps.
-  install_claims_dev: 50,
-  install_artifact_bytes_dev: 64 * MiB,
-  ip_claims: 10,
-  ip_bugs: 3,
-  global_claims: 2000,
-  global_artifact_bytes: 300 * MiB,
-  global_new_signatures: 200,
-  global_bugs: 100,
+  prerelease_install_claims_per_day: 50,
+  prerelease_install_artifact_bytes_per_day: 64 * MiB,
+  ip_claims_per_day: 10,
+  ip_bugs_per_day: 3,
+  global_claims_per_day: 2000,
+  global_artifact_bytes_per_day: 300 * MiB,
+  global_new_signatures_per_day: 200,
+  global_bugs_per_day: 100,
 } as const;
 
 export type CapName = keyof typeof DEFAULT_CAPS;
@@ -136,8 +137,8 @@ export async function hasRoom(db: D1Database, day: string, checks: LimitCheck[])
 
 export function installCaps(caps: Caps, channel: Channel): { claims: number; bytes: number } {
   return channel === "release"
-    ? { claims: caps.install_claims, bytes: caps.install_artifact_bytes }
-    : { claims: caps.install_claims_dev, bytes: caps.install_artifact_bytes_dev };
+    ? { claims: caps.install_claims_per_day, bytes: caps.install_artifact_bytes_per_day }
+    : { claims: caps.prerelease_install_claims_per_day, bytes: caps.prerelease_install_artifact_bytes_per_day };
 }
 
 // ---------------------------------------------------------------------------

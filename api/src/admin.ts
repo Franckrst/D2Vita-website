@@ -7,6 +7,7 @@ import { requireSecret, type Env } from "./env";
 import { error, json, readBoundedJson } from "./http";
 import { SCOPE, loadSettings, saveSettings, utcDay, type Settings } from "./limits";
 import { StatementBudget, purgePieces } from "./maintenance";
+import { RULES_VERSION } from "./signature";
 import { ARTIFACT_NAMES, KINDS, type ArtifactName } from "./types";
 import { artifactKey } from "./uploads";
 import { validateBugPatch, validateBuildRegistration, validateSettingsPatch, validateSignaturePatch } from "./validate";
@@ -21,7 +22,7 @@ export async function isAdmin(request: Request, env: Env): Promise<boolean> {
 }
 
 export function unauthorized(): Response {
-  const response = error(401, "unauthorized", "A valid admin token is required");
+  const response = error("unauthorized", "A valid admin token is required");
   response.headers.set("www-authenticate", "Bearer");
   return response;
 }
@@ -82,7 +83,7 @@ function decodeCursor(raw: string | null): Cursor | null {
 
 function withBadQuery(fn: () => Promise<Response>): Promise<Response> {
   return fn().catch((e) => {
-    if (e instanceof BadQuery) return error(400, "invalid_payload", e.message);
+    if (e instanceof BadQuery) return error("invalid_payload", e.message);
     throw e;
   });
 }
@@ -92,27 +93,40 @@ function withBadQuery(fn: () => Promise<Response>): Promise<Response> {
 
 type Row = Record<string, unknown>;
 
+// admin.v1#SignatureSummary: exactly these fields, no more (the local admin
+// tool checks what it receives against the contract).
 function signatureSummary(row: Row) {
   return {
     id: row.id,
     kind: row.kind,
+    canon: row.canon,
     status: row.status,
     count: row.count,
     installs: row.installs,
-    first_seen: row.first_seen,
-    last_seen: row.last_seen,
-    first_build: row.first_build,
-    last_build: row.last_build,
-    status_changed_at: row.status_changed_at,
+    first_seen_unix: row.first_seen,
+    last_seen_unix: row.last_seen,
+    sample_state: row.sample_state,
     fixed_in_version: row.fixed_in_version,
     merged_into: row.merged_into,
     issue_url: row.issue_url,
-    note: row.note,
-    sample_state: row.sample_state,
-    sample_report: row.sample_report,
-    rules_version: row.rules_version,
-    canon: row.canon,
   };
+}
+
+interface StoredPiece {
+  bytes: number;
+  sha256: string;
+  uploaded_at: number;
+}
+
+// admin.v1#StoredArtifact, from the reports.artifacts map of one report.
+function storedArtifacts(artifacts: unknown) {
+  const pieces = typeof artifacts === "string" ? (JSON.parse(artifacts) as Record<string, StoredPiece>) : {};
+  return Object.entries(pieces).map(([name, piece]) => ({
+    name,
+    bytes: piece.bytes,
+    sha256: piece.sha256,
+    stored_unix: piece.uploaded_at,
+  }));
 }
 
 export function listSignatures(request: Request, env: Env): Promise<Response> {
@@ -147,46 +161,48 @@ export function listSignatures(request: Request, env: Env): Promise<Response> {
   });
 }
 
+// admin.v1#SignatureDetail. sample_artifacts describes the pieces of
+// sample_report, the stored sample, so that a report id and a piece name taken
+// from this body always name the same object in R2.
 export async function signatureDetail(db: D1Database, id: string) {
   const row = await db.prepare("SELECT * FROM signatures WHERE id = ?1").bind(id).first<Row>();
   if (!row) return null;
-  const [builds, children, recent] = await db.batch<Row>([
+  const [builds, recent] = await db.batch<Row>([
     db
       .prepare(
         "SELECT build_id, count, first_seen, last_seen FROM signature_builds WHERE signature = ?1 ORDER BY last_seen DESC, build_id",
       )
       .bind(id),
-    db.prepare("SELECT id, count FROM signatures WHERE merged_into = ?1 ORDER BY count DESC, id").bind(id),
     db
       .prepare(
-        `SELECT report_id, raw_signature, build_id, channel, kind, received_at, action, completed_at, sample_stored
+        `SELECT report_id, build_id, received_at, action
          FROM reports WHERE signature = ?1 ORDER BY received_at DESC, report_id LIMIT 20`,
       )
       .bind(id),
   ]);
-  const sampleReport = (row.sample_state === "leased" ? row.lease_report : row.sample_report) as string | null;
-  const sampleArtifacts = sampleReport
+  const sampleReport = row.sample_report as string | null;
+  const sample = sampleReport
     ? await db.prepare("SELECT artifacts FROM reports WHERE report_id = ?1").bind(sampleReport).first<{ artifacts: string }>()
     : null;
-  const mergedFrom = children?.results ?? [];
   return {
     ...signatureSummary(row),
+    rules_version: row.rules_version,
+    note: row.note,
+    sample_report: sampleReport,
     lease_report: row.lease_report,
-    lease_expires: row.lease_expires,
-    sample_purged_at: row.sample_purged_at,
-    total_count: (row.count as number) + mergedFrom.reduce((sum, c) => sum + (c.count as number), 0),
-    merged_from: mergedFrom,
-    builds: builds?.results ?? [],
-    sample: {
-      state: row.sample_state,
-      report_id: sampleReport,
-      lease_expires: row.lease_expires,
-      purged_at: row.sample_purged_at,
-      artifacts: sampleArtifacts ? JSON.parse(sampleArtifacts.artifacts) : {},
-    },
+    lease_expires_unix: row.lease_expires,
+    sample_artifacts: storedArtifacts(sample?.artifacts),
+    builds: (builds?.results ?? []).map((b) => ({
+      build_id: b.build_id,
+      count: b.count,
+      first_seen_unix: b.first_seen,
+      last_seen_unix: b.last_seen,
+    })),
     recent_reports: (recent?.results ?? []).map((r) => ({
-      ...r,
-      sample_stored: r.sample_stored === null ? null : r.sample_stored === 1,
+      report_id: r.report_id,
+      build_id: r.build_id,
+      received_unix: r.received_at,
+      action: r.action,
     })),
   };
 }
@@ -218,20 +234,20 @@ export async function patchSignature(
   const body = await readBoundedJson(request, ADMIN_BODY_MAX_BYTES);
   if (!body.ok) return body.response;
   const validation = validateSignaturePatch(body.value);
-  if (!validation.ok) return error(400, "invalid_payload", validation.error);
+  if (!validation.ok) return error("invalid_payload", validation.error);
   const patch = validation.value;
 
   const db = env.DB;
   const row = SIGNATURE_ID.test(id)
     ? await db.prepare("SELECT id, status, fixed_in_version FROM signatures WHERE id = ?1").bind(id).first<Row>()
     : null;
-  if (!row) return error(404, "not_found", "No such signature");
+  if (!row) return error("not_found", "No such signature");
 
   // A fixed signature needs its version, or regressions could never be detected.
   const status = patch.status ?? row.status;
   const version = patch.fixed_in_version !== undefined ? patch.fixed_in_version : row.fixed_in_version;
   if (status === "fixed" && !version) {
-    return error(400, "invalid_payload", "fixed_in_version: required while status is fixed");
+    return error("invalid_payload", "fixed_in_version: required while status is fixed");
   }
 
   const sets: string[] = [];
@@ -249,10 +265,10 @@ export async function patchSignature(
   let newRoot: string | null = null;
   if (patch.merged_into !== undefined) {
     if (patch.merged_into !== null) {
-      if (patch.merged_into === id) return error(400, "invalid_payload", "merged_into: cannot merge into itself");
+      if (patch.merged_into === id) return error("invalid_payload", "merged_into: cannot merge into itself");
       newRoot = await mergeRoot(db, patch.merged_into);
-      if (!newRoot) return error(400, "invalid_payload", "merged_into: unknown signature");
-      if (newRoot === id) return error(400, "invalid_payload", "merged_into: would create a cycle");
+      if (!newRoot) return error("invalid_payload", "merged_into: unknown signature");
+      if (newRoot === id) return error("invalid_payload", "merged_into: would create a cycle");
     }
     set("merged_into", newRoot);
   }
@@ -266,7 +282,7 @@ export async function patchSignature(
   // Keep chains flat: whatever was merged into this signature follows it.
   if (newRoot) statements.push(db.prepare("UPDATE signatures SET merged_into = ?1 WHERE merged_into = ?2").bind(newRoot, id));
   await db.batch(statements);
-  return json({ signature: await signatureDetail(db, id) });
+  return json(await signatureDetail(db, id) as Record<string, unknown>);
 }
 
 export async function getSignature(
@@ -278,16 +294,12 @@ export async function getSignature(
 ): Promise<Response> {
   const id = params[0] ?? "";
   const detail = SIGNATURE_ID.test(id) ? await signatureDetail(env.DB, id) : null;
-  if (!detail) return error(404, "not_found", "No such signature");
-  return json({ signature: detail });
+  if (!detail) return error("not_found", "No such signature");
+  return json(detail);
 }
 
 // ---------------------------------------------------------------------------
 // Reports and sealed pieces.
-
-function parseJson(text: unknown): unknown {
-  return typeof text === "string" ? JSON.parse(text) : null;
-}
 
 export async function getReport(
   _request: Request,
@@ -298,26 +310,18 @@ export async function getReport(
 ): Promise<Response> {
   const id = params[0] ?? "";
   const row = REPORT_ID.test(id) ? await env.DB.prepare("SELECT * FROM reports WHERE report_id = ?1").bind(id).first<Row>() : null;
-  if (!row) return error(404, "not_found", "No such report");
+  if (!row) return error("not_found", "No such report");
+  // admin.v1#ReportDetail: the stored claim and what happened to it.
   return json({
-    report: {
-      report_id: row.report_id,
-      signature: row.signature,
-      raw_signature: row.raw_signature,
-      install_hash: row.install_hash,
-      build_id: row.build_id,
-      channel: row.channel,
-      kind: row.kind,
-      received_at: row.received_at,
-      action: row.action,
-      claim: parseJson(row.claim),
-      decision: parseJson(row.decision),
-      requested: parseJson(row.requested),
-      upload_expires: row.upload_expires,
-      artifacts: parseJson(row.artifacts),
-      completed_at: row.completed_at,
-      sample_stored: row.sample_stored === null ? null : row.sample_stored === 1,
-    },
+    report_id: row.report_id,
+    signature: row.signature,
+    install_hash: row.install_hash,
+    received_unix: row.received_at,
+    rules_version: RULES_VERSION,
+    action: row.action,
+    completed_unix: row.completed_at,
+    claim: JSON.parse(row.claim as string),
+    artifacts: storedArtifacts(row.artifacts),
   });
 }
 
@@ -330,13 +334,13 @@ export async function getArtifact(
 ): Promise<Response> {
   const [reportId = "", name = ""] = params;
   if (!REPORT_ID.test(reportId) || !ARTIFACT_NAMES.includes(name as ArtifactName)) {
-    return error(404, "not_found", "No such piece");
+    return error("not_found", "No such piece");
   }
   const row = await env.DB.prepare("SELECT signature, build_id, artifacts FROM reports WHERE report_id = ?1")
     .bind(reportId)
     .first<{ signature: string; build_id: string; artifacts: string }>();
   const object = row ? await env.ARTIFACTS.get(artifactKey(row.signature, reportId, name)) : null;
-  if (!row || !object) return error(404, "not_found", "No such piece");
+  if (!row || !object) return error("not_found", "No such piece");
   const meta = (JSON.parse(row.artifacts) as Record<string, { sha256?: string }>)[name];
   const headers = new Headers({
     "content-type": "application/octet-stream",
@@ -350,7 +354,8 @@ export async function getArtifact(
 // ---------------------------------------------------------------------------
 // Bugs from the public site.
 
-const BUG_COLUMNS = "id, title, description, version, contact, lang, status, issue_url, note, created_at, updated_at";
+// admin.v1#BugItem: the contract keeps no note and no updated time on a bug.
+const BUG_COLUMNS = "id, title, description, version, contact, lang, status, issue_url, created_at AS created_unix";
 
 export function listBugs(request: Request, env: Env): Promise<Response> {
   return withBadQuery(async () => {
@@ -372,7 +377,7 @@ export function listBugs(request: Request, env: Env): Promise<Response> {
     const { results } = await env.DB.prepare(sql).bind(...binds).all<Row>();
     const page = results.slice(0, limit);
     const last = page[page.length - 1];
-    const next = results.length > limit && last ? encodeCursor({ k: last.created_at as number, id: last.id as string }) : null;
+    const next = results.length > limit && last ? encodeCursor({ k: last.created_unix as number, id: last.id as string }) : null;
     return json({ items: page, next_cursor: next });
   });
 }
@@ -389,8 +394,8 @@ export async function getBug(
   params: string[],
 ): Promise<Response> {
   const bug = await bugById(env.DB, params[0] ?? "");
-  if (!bug) return error(404, "not_found", "No such bug");
-  return json({ bug });
+  if (!bug) return error("not_found", "No such bug");
+  return json(bug);
 }
 
 export async function patchBug(
@@ -404,17 +409,17 @@ export async function patchBug(
   const body = await readBoundedJson(request, ADMIN_BODY_MAX_BYTES);
   if (!body.ok) return body.response;
   const validation = validateBugPatch(body.value);
-  if (!validation.ok) return error(400, "invalid_payload", validation.error);
-  if (!(await bugById(env.DB, id))) return error(404, "not_found", "No such bug");
+  if (!validation.ok) return error("invalid_payload", validation.error);
+  if (!(await bugById(env.DB, id))) return error("not_found", "No such bug");
 
   const sets: string[] = [];
   const binds: unknown[] = [];
-  for (const column of ["status", "issue_url", "note"] as const) {
+  for (const column of ["status", "issue_url"] as const) {
     if (validation.value[column] !== undefined) sets.push(`${column} = ?${binds.push(validation.value[column])}`);
   }
   sets.push(`updated_at = ?${binds.push(now)}`);
   await env.DB.prepare(`UPDATE bugs SET ${sets.join(", ")} WHERE id = ?${binds.push(id)}`).bind(...binds).run();
-  return json({ bug: await bugById(env.DB, id) });
+  return json((await bugById(env.DB, id)) as Row);
 }
 
 // ---------------------------------------------------------------------------
@@ -429,25 +434,28 @@ export async function postBuild(
   const body = await readBoundedJson(request, ADMIN_BODY_MAX_BYTES);
   if (!body.ok) return body.response;
   const validation = validateBuildRegistration(body.value);
-  if (!validation.ok) return error(400, "invalid_payload", validation.error);
+  if (!validation.ok) return error("invalid_payload", validation.error);
   const { build_id, version, channel } = validation.value;
   const [inserted, , row] = await env.DB.batch<Row>([
     env.DB.prepare(
       "INSERT INTO builds (build_id, version, channel, registered_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (build_id) DO NOTHING",
     ).bind(build_id, version, channel, now),
     env.DB.prepare("UPDATE builds SET version = ?2, channel = ?3 WHERE build_id = ?1").bind(build_id, version, channel),
-    env.DB.prepare("SELECT build_id, version, channel, registered_at FROM builds WHERE build_id = ?1").bind(build_id),
+    env.DB.prepare("SELECT build_id, version, channel, registered_at AS registered_unix FROM builds WHERE build_id = ?1").bind(
+      build_id,
+    ),
   ]);
   const created = (inserted?.meta.changes ?? 0) > 0;
-  return json({ created, build: row?.results[0] }, created ? 201 : 200);
+  // admin.v1#BuildRecord, 201 when this call created the row.
+  return json(row?.results[0] as Row, created ? 201 : 200);
 }
 
 const INSTALL_ID = /^[0-9a-f]{32}$/;
 
 export interface Erasure {
   done: boolean;
-  deleted_reports: number;
-  deleted_artifacts: number;
+  reports_deleted: number;
+  artifacts_deleted: number;
 }
 
 // GDPR erasure: claims and sealed pieces of one installation. Aggregate
@@ -457,7 +465,7 @@ export interface Erasure {
 export async function eraseInstall(env: Env, hash: string, budget = new StatementBudget()): Promise<Erasure> {
   const db = env.DB;
   const ofInstall = "SELECT report_id FROM reports WHERE install_hash = ?1";
-  const erasure: Erasure = { done: false, deleted_reports: 0, deleted_artifacts: 0 };
+  const erasure: Erasure = { done: false, reports_deleted: 0, artifacts_deleted: 0 };
 
   if (!budget.take(5)) return erasure;
   await db.batch([
@@ -482,16 +490,17 @@ export async function eraseInstall(env: Env, hash: string, budget = new Statemen
 
   // Pieces first; the rows go in one statement once none has pieces left.
   const pieces = await purgePieces(env, budget, "install_hash = ?1", [hash]);
-  erasure.deleted_artifacts = pieces.deleted;
+  erasure.artifacts_deleted = pieces.deleted;
   if (!pieces.done || !budget.take(1)) return erasure;
   const rows = await db.prepare("DELETE FROM reports WHERE install_hash = ?1 AND artifacts = '{}'").bind(hash).run();
-  erasure.deleted_reports = rows.meta.changes;
+  erasure.reports_deleted = rows.meta.changes;
   erasure.done = true;
   return erasure;
 }
 
 // DELETE /v1/admin/installs/{install_id}: 200 when the erasure is complete,
-// 202 (done false) when it must be called again.
+// 202 with the same body (admin.v1#ForgetInstallResult) when the D1 statement
+// budget ran out and the call has to be repeated; the counts are per call.
 export async function deleteInstall(
   _request: Request,
   env: Env,
@@ -500,12 +509,13 @@ export async function deleteInstall(
   params: string[],
 ): Promise<Response> {
   const installId = params[0] ?? "";
-  if (!INSTALL_ID.test(installId)) return error(400, "invalid_payload", "install_id: must be 32 lower-case hex characters");
+  if (!INSTALL_ID.test(installId)) return error("invalid_payload", "install_id: must be 32 lower-case hex characters");
   const hash = await installHash(requireSecret(env.INSTALL_HASH_KEY, "INSTALL_HASH_KEY"), installId);
-  const erasure = await eraseInstall(env, hash);
-  return json({ ...erasure }, erasure.done ? 200 : 202);
+  const { done, ...counts } = await eraseInstall(env, hash);
+  return json(counts, done ? 200 : 202);
 }
 
+// admin.v1#Settings: the kill switch and every cap.
 function publicSettings(settings: Settings) {
   return { accepting: settings.accepting, disable_until_unix: settings.disable_until_unix, caps: settings.caps };
 }
@@ -518,30 +528,21 @@ export async function getStats(
 ): Promise<Response> {
   const day = utcDay(now);
   const settings = await loadSettings(env.DB);
-  const [counters, totals] = await env.DB.batch<Row>([
-    env.DB.prepare("SELECT scope, n FROM rate_counters WHERE subject = '*' AND day = ?1").bind(day),
-    env.DB.prepare(
-      `SELECT (SELECT COUNT(*) FROM signatures) AS signatures,
-              (SELECT COUNT(*) FROM reports) AS reports,
-              (SELECT COUNT(*) FROM signatures WHERE sample_state = 'stored') AS stored_samples,
-              (SELECT COUNT(*) FROM bugs) AS bugs,
-              (SELECT COUNT(*) FROM builds) AS builds`,
-    ),
-  ]);
-  const used = (scope: string) => (counters?.results.find((c) => c.scope === scope)?.n as number | undefined) ?? 0;
+  const counters = await env.DB.prepare("SELECT scope, n FROM rate_counters WHERE subject = '*' AND day = ?1")
+    .bind(day)
+    .all<Row>();
+  const used = (scope: string) => (counters.results.find((c) => c.scope === scope)?.n as number | undefined) ?? 0;
+  // admin.v1#Stats: the global quota use of the current UTC day. The database
+  // size is not part of it; the daily cron logs it (README, Capacity).
   return json({
     day,
-    now,
-    // D1 Free refuses every write once a database reaches 500 MB.
-    database_bytes: totals?.meta.size_after ?? null,
-    today: {
-      claims: { used: used(SCOPE.globalClaims), cap: settings.caps.global_claims },
-      artifact_bytes: { used: used(SCOPE.globalBytes), cap: settings.caps.global_artifact_bytes },
-      new_signatures: { used: used(SCOPE.globalNewSignatures), cap: settings.caps.global_new_signatures },
-      bugs: { used: used(SCOPE.globalBugs), cap: settings.caps.global_bugs },
+    accepting: settings.accepting,
+    usage: {
+      claims: { used: used(SCOPE.globalClaims), cap: settings.caps.global_claims_per_day },
+      artifact_bytes: { used: used(SCOPE.globalBytes), cap: settings.caps.global_artifact_bytes_per_day },
+      new_signatures: { used: used(SCOPE.globalNewSignatures), cap: settings.caps.global_new_signatures_per_day },
+      bugs: { used: used(SCOPE.globalBugs), cap: settings.caps.global_bugs_per_day },
     },
-    totals: totals?.results[0],
-    settings: publicSettings(settings),
   });
 }
 
@@ -549,7 +550,7 @@ export async function putSettings(request: Request, env: Env): Promise<Response>
   const body = await readBoundedJson(request, ADMIN_BODY_MAX_BYTES);
   if (!body.ok) return body.response;
   const validation = validateSettingsPatch(body.value);
-  if (!validation.ok) return error(400, "invalid_payload", validation.error);
+  if (!validation.ok) return error("invalid_payload", validation.error);
   await saveSettings(env.DB, validation.value);
-  return json({ settings: publicSettings(await loadSettings(env.DB)) });
+  return json(publicSettings(await loadSettings(env.DB)));
 }

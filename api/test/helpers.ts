@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { expect } from "vitest";
 import { fromBase64, fromHex, utf8 } from "../src/crypto";
 import { handle } from "../src/router";
+import { contractResponseProblems } from "./contract";
 import { BUILD_ID } from "./fixtures";
 
 // 2026-09-13T07:20:00Z, the started_unix of the spec example.
@@ -32,10 +33,18 @@ export async function resetDatabase(): Promise<void> {
 }
 
 // Runs the Worker router with an injected clock and waits for waitUntil work.
+// Every answer is held against the contract on the way out, so no test can see
+// a body the contract would refuse (test/contract.ts).
 export async function call(request: Request, now = NOW, bindings: Cloudflare.Env = env): Promise<Response> {
   const ctx = createExecutionContext();
   const response = await handle(request, bindings, ctx, now);
   await waitOnExecutionContext(ctx);
+  return expectContractResponse(request, response);
+}
+
+export async function expectContractResponse(request: Request, response: Response): Promise<Response> {
+  const problems = await contractResponseProblems(request, response);
+  expect(problems.map((p) => `${p.where}: ${p.detail}`)).toEqual([]);
   return response;
 }
 

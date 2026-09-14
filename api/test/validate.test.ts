@@ -215,7 +215,10 @@ describe("admin payloads", () => {
     expectInvalid(validateSignaturePatch({ status: "fixed", fixed_in_version: "0.2" }), "fixed_in_version");
     expectInvalid(validateSignaturePatch({ merged_into: "S123" }), "merged_into");
     expectInvalid(validateSignaturePatch({ issue_url: "javascript:alert(1)" }), "issue_url");
-    expectInvalid(validateSignaturePatch({ resample: false }), "resample");
+    expect(validateSignaturePatch({ resample: false }).ok).toBe(true);
+    expectInvalid(validateSignaturePatch({ resample: "yes" }), "resample");
+    expectInvalid(validateSignaturePatch({ note: "x".repeat(2001) }), "note");
+    expectInvalid(validateSignaturePatch({ issue_url: "https://example.com/a b" }), "issue_url");
     expectInvalid(validateSignaturePatch({ count: 0 }), "count");
     expectInvalid(validateSignaturePatch({}), "empty");
   });
@@ -226,6 +229,8 @@ describe("admin payloads", () => {
     );
     expectInvalid(validateBugPatch({ status: "done" }), "status");
     expectInvalid(validateBugPatch({ title: "x" }), "title");
+    // admin.v1#BugPatch has no note.
+    expectInvalid(validateBugPatch({ note: "x" }), "note");
   });
 
   it("validates a build registration", () => {
@@ -237,9 +242,9 @@ describe("admin payloads", () => {
 
   it("validates a settings patch", () => {
     expect(validateSettingsPatch({ accepting: false, disable_until_unix: 1789290000 }).ok).toBe(true);
-    expect(validateSettingsPatch({ caps: { install_claims: 5, global_bugs: 0 } }).ok).toBe(true);
+    expect(validateSettingsPatch({ caps: { install_claims_per_day: 5, global_bugs_per_day: 0 } }).ok).toBe(true);
     expectInvalid(validateSettingsPatch({ accepting: "no" }), "accepting");
-    expectInvalid(validateSettingsPatch({ caps: { install_claims: -1 } }), "caps.install_claims");
+    expectInvalid(validateSettingsPatch({ caps: { install_claims_per_day: -1 } }), "caps.install_claims_per_day");
     expectInvalid(validateSettingsPatch({ caps: { made_up: 1 } }), "caps.made_up");
     expectInvalid(validateSettingsPatch({ ip_salt: "x" }), "ip_salt");
   });

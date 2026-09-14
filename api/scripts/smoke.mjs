@@ -63,8 +63,13 @@ const claim = {
   platform: { model: "vita", fw: "3.65" },
   session: { started_unix: Math.floor(Date.now() / 1000) - 60, uptime_s: 60, online: false },
   kind: "hang",
-  // Random EIP: a new signature on every run, so an upload is requested.
-  features: { stalled_beats: 3, eip: `Game+0x${randomBytes(3).toString("hex")}`, runner_state: "running" },
+  // Random EIP: a new signature on every run, so an upload is requested. The
+  // contract wants lower-case hex without leading zeros.
+  features: {
+    stalled_beats: 3,
+    eip: `Game+0x${(parseInt(randomBytes(3).toString("hex"), 16) || 1).toString(16)}`,
+    runner_state: "running",
+  },
   hints: [],
   artifacts: [
     { name: "crash_log", bytes: 3000 },

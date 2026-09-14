@@ -42,7 +42,9 @@ export async function handleBugPreflight(request: Request, env: Env): Promise<Re
 export async function handleBug(request: Request, env: Env, _ctx: ExecutionContext, now: number): Promise<Response> {
   const origin = request.headers.get("origin");
   if (origin === null) return createBug(request, env, now);
-  if (origin !== allowedOrigin(env)) return error(403, "origin_not_allowed", "Origin not allowed");
+  // The contract has no code for a refused origin: a request that does not come
+  // from the site is answered like any other body the API will not take.
+  if (origin !== allowedOrigin(env)) return error("invalid_payload", "Origin not allowed");
   return withCors(await createBug(request, env, now), origin);
 }
 
@@ -50,21 +52,21 @@ async function createBug(request: Request, env: Env, now: number): Promise<Respo
   const body = await readBoundedJson(request, BUG_MAX_BYTES);
   if (!body.ok) return body.response;
   const validation = validateBug(body.value);
-  if (!validation.ok) return error(400, "invalid_payload", validation.error);
+  if (!validation.ok) return error("invalid_payload", validation.error);
   const bug = validation.value;
 
   // Turnstile first: failed attempts must not eat the IP or global budget.
   const ip = request.headers.get("cf-connecting-ip");
   if (!(await verifyTurnstile(env, bug.turnstile_token, ip))) {
-    return error(403, "turnstile", "Turnstile verification failed");
+    return error("turnstile", "Turnstile verification failed");
   }
 
   const settings = await loadSettings(env.DB);
   const day = utcDay(now);
   const ipSubject = await ipHash(env, env.DB, networkKey(ip, 64), day, settings.salts);
   const refused = await consumeAll(env.DB, day, [
-    { scope: SCOPE.ipBugs, subject: ipSubject, amount: 1, cap: settings.caps.ip_bugs },
-    { scope: SCOPE.globalBugs, subject: "*", amount: 1, cap: settings.caps.global_bugs },
+    { scope: SCOPE.ipBugs, subject: ipSubject, amount: 1, cap: settings.caps.ip_bugs_per_day },
+    { scope: SCOPE.globalBugs, subject: "*", amount: 1, cap: settings.caps.global_bugs_per_day },
   ]);
   if (refused) return rateLimited(now);
 

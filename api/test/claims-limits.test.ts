@@ -44,7 +44,7 @@ describe("claim rate limits (spec section 5.5)", () => {
 
   it("raises the installation cap for dev and test builds, and still enforces it", async () => {
     await registerBuild(DEV_BUILD, "dev");
-    await setCap("install_claims_dev", 5);
+    await setCap("prerelease_install_claims_per_day", 5);
     const install = installId();
     const devClaim = () => claimRequest(haltClaim({ install_id: install, build_id: DEV_BUILD, channel: "dev" }));
     for (let i = 0; i < 5; i++) expect((await call(devClaim())).status).toBe(200);
@@ -88,14 +88,14 @@ describe("claim rate limits (spec section 5.5)", () => {
   });
 
   it("applies the global daily claim cap", async () => {
-    await setCap("global_claims", 2);
+    await setCap("global_claims_per_day", 2);
     expect((await call(claimRequest(haltClaim()))).status).toBe(200);
     expect((await call(claimRequest(haltClaim()))).status).toBe(200);
     expect((await call(claimRequest(haltClaim()))).status).toBe(429);
   });
 
   it("applies the global cap on new signatures but still counts known ones", async () => {
-    await setCap("global_new_signatures", 1);
+    await setCap("global_new_signatures_per_day", 1);
     expect((await call(claimRequest(haltClaim()))).status).toBe(200);
     const refused = await call(claimRequest(hostFaultClaim()));
     expect(refused.status).toBe(429);
