@@ -50,10 +50,11 @@ export function secondsUntilNextUtcDay(nowUnix: number): number {
   return 86400 - (nowUnix % 86400);
 }
 
-export function rateLimited(nowUnix: number): Response {
+// `bound` ties a console answer to its request ({report_id, name}).
+export function rateLimited(nowUnix: number, bound?: Record<string, unknown>): Response {
   const retry = secondsUntilNextUtcDay(nowUnix);
   return json(
-    { error: "rate_limited", message: "Daily limit reached", retry_after_s: retry },
+    { error: "rate_limited", message: "Daily limit reached", retry_after_s: retry, ...bound },
     429,
     { "retry-after": String(retry) },
   );

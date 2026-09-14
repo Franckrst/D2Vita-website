@@ -158,14 +158,19 @@ export async function handleUpload(
 
   const grant = await authorize(request, env, reportId, now);
   if (grant instanceof Response) return grant;
+  // Past the token, answers are bound to the report (and to the piece once it
+  // is known to be requested): a captured answer cannot serve another request.
   const piece = grant.artifacts.find((a) => a.name === name);
-  if (!piece) return error(403, "bad_token", "This piece was not requested");
-  if (declared > piece.max_bytes) return error(413, "payload_too_large", `Piece is limited to ${piece.max_bytes} bytes`);
+  if (!piece) return error(403, "bad_token", "This piece was not requested", { report_id: reportId });
+  const bound = { report_id: reportId, name: piece.name };
+  if (declared > piece.max_bytes) {
+    return error(413, "payload_too_large", `Piece is limited to ${piece.max_bytes} bytes`, bound);
+  }
 
   const report = await loadReport(env.DB, reportId);
-  if (!report || report.action !== "upload") return error(403, "bad_token", "No upload is expected for this report");
-  if (report.completed_at !== null) return error(409, "exists", "This report is already complete");
-  if (recordedPieces(report)[name]) return error(409, "exists", "This piece is already stored");
+  if (!report || report.action !== "upload") return error(403, "bad_token", "No upload is expected for this report", bound);
+  if (report.completed_at !== null) return error(409, "exists", "This report is already complete", bound);
+  if (recordedPieces(report)[name]) return error(409, "exists", "This piece is already stored", bound);
 
   const settings = await loadSettings(env.DB);
   const perInstall = installCaps(settings.caps, report.channel);
@@ -174,7 +179,7 @@ export async function handleUpload(
     { scope: SCOPE.installBytes, subject: report.install_hash, amount: declared, cap: perInstall.bytes },
     { scope: SCOPE.globalBytes, subject: "*", amount: declared, cap: settings.caps.global_artifact_bytes },
   ];
-  if (!(await hasRoom(env.DB, day, budget))) return rateLimited(now);
+  if (!(await hasRoom(env.DB, day, budget))) return rateLimited(now, bound);
 
   const key = artifactKey(grant.signature, reportId, name);
   const stored = await streamToR2(env.ARTIFACTS, key, request.body, declared, {
@@ -182,9 +187,9 @@ export async function handleUpload(
     build_id: report.build_id,
   });
   if (!stored.ok) {
-    if (stored.cause === "body") return error(400, "invalid_payload", "Body does not match Content-Length");
+    if (stored.cause === "body") return error(400, "invalid_payload", "Body does not match Content-Length", bound);
     console.error("artifact storage failed:", stored.error instanceof Error ? stored.error.message : String(stored.error));
-    return error(500, "storage_unavailable", "The piece could not be stored, retry later");
+    return error(500, "storage_unavailable", "The piece could not be stored, retry later", bound);
   }
 
   if (await consumeAllOrNothing(env.DB, day, budget)) {
@@ -193,7 +198,7 @@ export async function handleUpload(
     // meanwhile, the object is that record's and stays.
     const current = await loadReport(env.DB, reportId);
     if (!current || !recordedPieces(current)[name]) await env.ARTIFACTS.delete(key);
-    return rateLimited(now);
+    return rateLimited(now, bound);
   }
 
   await env.DB.prepare("UPDATE reports SET artifacts = json_set(artifacts, '$.' || ?2, json(?3)) WHERE report_id = ?1")
@@ -212,23 +217,24 @@ export async function handleComplete(
   const [reportId = ""] = params;
   const grant = await authorize(request, env, reportId, now);
   if (grant instanceof Response) return grant;
+  const bound = { report_id: reportId };
 
-  const body = await readBoundedJson(request, COMPLETE_MAX_BYTES);
+  const body = await readBoundedJson(request, COMPLETE_MAX_BYTES, bound);
   if (!body.ok) return body.response;
   const listed = validateComplete(
     body.value,
     grant.artifacts.map((a) => a.name),
   );
-  if (!listed.ok) return error(400, "invalid_payload", listed.error);
+  if (!listed.ok) return error(400, "invalid_payload", listed.error, bound);
 
   const report = await loadReport(env.DB, reportId);
-  if (!report || report.action !== "upload") return error(403, "bad_token", "No upload is expected for this report");
-  if (report.completed_at !== null) return json({ sample_stored: report.sample_stored === 1 });
+  if (!report || report.action !== "upload") return error(403, "bad_token", "No upload is expected for this report", bound);
+  if (report.completed_at !== null) return json({ ...bound, sample_stored: report.sample_stored === 1 });
 
   const stored = recordedPieces(report);
   const missing = grant.artifacts.filter((a) => !stored[a.name]).map((a) => a.name);
   if (missing.length > 0) {
-    return error(409, "incomplete", "Some requested pieces are not stored yet", { missing });
+    return error(409, "incomplete", "Some requested pieces are not stored yet", { ...bound, missing });
   }
 
   const [, , readBack] = await env.DB.batch<{ sample_stored: number }>([
@@ -244,5 +250,5 @@ export async function handleComplete(
     ).bind(reportId, grant.signature, now),
     env.DB.prepare("SELECT sample_stored FROM reports WHERE report_id = ?1").bind(reportId),
   ]);
-  return json({ sample_stored: readBack?.results[0]?.sample_stored === 1 });
+  return json({ ...bound, sample_stored: readBack?.results[0]?.sample_stored === 1 });
 }

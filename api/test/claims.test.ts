@@ -18,16 +18,20 @@ beforeEach(async () => {
 });
 
 describe("POST /v1/claims: refusals", () => {
-  it("refuses an unknown build with a signed 403 unknown_build", async () => {
-    const res = await call(claimRequest(haltClaim({ build_id: "9.9.9+000000000000" })));
+  it("refuses an unknown build with a signed 403 unknown_build bound to the report", async () => {
+    const claim = haltClaim({ build_id: "9.9.9+000000000000" });
+    const res = await call(claimRequest(claim));
     expect(res.status).toBe(403);
-    expect(await signedJson(res)).toMatchObject({ v: 1, error: "unknown_build" });
+    expect(await signedJson(res)).toMatchObject({ v: 1, error: "unknown_build", report_id: claim.report_id });
   });
 
   it("refuses an invalid claim with a signed 400 invalid_payload", async () => {
     const res = await call(claimRequest(haltClaim({ kind: "meteor" })));
     expect(res.status).toBe(400);
-    expect(await signedJson(res)).toMatchObject({ v: 1, error: "invalid_payload" });
+    const body = await signedJson(res);
+    expect(body).toMatchObject({ v: 1, error: "invalid_payload" });
+    // Nothing of an invalid claim is echoed into a signed answer.
+    expect(body.report_id).toBeUndefined();
   });
 
   it("requires console headers matching the claim", async () => {
@@ -41,7 +45,7 @@ describe("POST /v1/claims: refusals", () => {
     for (const headers of variants) {
       const res = await call(claimRequest(claim, { headers }));
       expect(res.status, JSON.stringify(headers)).toBe(400);
-      expect(await signedJson(res)).toMatchObject({ error: "invalid_payload" });
+      expect(await signedJson(res)).toMatchObject({ error: "invalid_payload", report_id: claim.report_id });
     }
   });
 
@@ -192,7 +196,7 @@ describe("POST /v1/claims: deduplication (spec section 5.4)", () => {
     await call(claimRequest(claim));
     const res = await call(claimRequest({ ...claim, install_id: installId() }));
     expect(res.status).toBe(400);
-    expect(await signedJson(res)).toMatchObject({ error: "invalid_payload" });
+    expect(await signedJson(res)).toMatchObject({ error: "invalid_payload", report_id: claim.report_id });
   });
 
   it("gives exactly one upload decision to 30 simultaneous claims of a new signature", async () => {

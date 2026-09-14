@@ -52,21 +52,26 @@ export type BodyResult = { ok: true; value: unknown } | { ok: false; response: R
 
 // Size is checked from Content-Length BEFORE the body is read. A missing
 // Content-Length is answered 413 (length_required), like artifact uploads.
-export async function readBoundedJson(request: Request, maxBytes: number): Promise<BodyResult> {
+// `bound` fields are added to error bodies (see rateLimited).
+export async function readBoundedJson(
+  request: Request,
+  maxBytes: number,
+  bound?: Record<string, unknown>,
+): Promise<BodyResult> {
   const declared = declaredLength(request);
   if (declared === null) {
-    return { ok: false, response: error(413, "length_required", "Content-Length is required") };
+    return { ok: false, response: error(413, "length_required", "Content-Length is required", bound) };
   }
   if (declared > maxBytes) {
-    return { ok: false, response: error(413, "payload_too_large", `Body is limited to ${maxBytes} bytes`) };
+    return { ok: false, response: error(413, "payload_too_large", `Body is limited to ${maxBytes} bytes`, bound) };
   }
   const bytes = new Uint8Array(await request.arrayBuffer());
   if (bytes.byteLength > maxBytes) {
-    return { ok: false, response: error(413, "payload_too_large", `Body is limited to ${maxBytes} bytes`) };
+    return { ok: false, response: error(413, "payload_too_large", `Body is limited to ${maxBytes} bytes`, bound) };
   }
   try {
     return { ok: true, value: JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes)) };
   } catch {
-    return { ok: false, response: error(400, "invalid_payload", "Body is not valid UTF-8 JSON") };
+    return { ok: false, response: error(400, "invalid_payload", "Body is not valid UTF-8 JSON", bound) };
   }
 }

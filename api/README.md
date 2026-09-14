@@ -92,6 +92,16 @@ at a local server with `D2_CRASHREPORT_URL`.
 All JSON bodies carry `"v": 1`. Errors are `{"v":1,"error":"<code>","message":"…"}`
 plus `retry_after_s` (429) or `disable_until_unix` (503).
 
+Console answers are bound to their request so that a signed answer captured
+from one report cannot be replayed to a console for another: `report_id` is in
+every decision, in every answer to a valid claim (400 header mismatch, 403
+`unknown_build`, 429), and in every answer past a valid upload token (plus
+`name` on piece routes once the piece is known to be requested). Answers to
+requests that prove nothing (invalid claim, missing or bad token, 413 before the
+token is checked, 503 kill switch) are not bound: anyone could obtain them for
+any report id. The console should only act on a bound answer whose `report_id`
+(and `name`) match its request.
+
 ### Console
 
 Requests carry `X-D2V-Client: d2vita/<build_id>` and `X-D2V-Install: <install_id>`.
@@ -102,7 +112,7 @@ Requests carry `X-D2V-Client: d2vita/<build_id>` and `X-D2V-Install: <install_id
 |---|---|---|
 | POST | `/v1/claims` | `200` decision · `400 invalid_payload` · `403 unknown_build` · `413` · `429 rate_limited` · `503 not_accepting` |
 | PUT | `/v1/reports/{report_id}/artifacts/{name}` | `201 {name, bytes, sha256}` · `400` (body shorter/longer than declared, or cut off) · `403 bad_token` · `409 exists` · `413` · `429` · `500 storage_unavailable` (R2 failed: retry later) |
-| POST | `/v1/reports/{report_id}/complete` | `200 {"sample_stored":bool}` · `400` · `403 bad_token` · `409 incomplete` |
+| POST | `/v1/reports/{report_id}/complete` | `200 {"report_id":…,"sample_stored":bool}` · `400` · `403 bad_token` · `409 incomplete` (`missing`) |
 
 Decision (`action` is `upload` or `count_only`; `upload` is `null` for `count_only`):
 

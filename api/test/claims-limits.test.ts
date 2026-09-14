@@ -27,12 +27,14 @@ describe("claim rate limits (spec section 5.5)", () => {
     for (let i = 0; i < 3; i++) {
       expect((await call(claimRequest(haltClaim({ install_id: install })))).status).toBe(200);
     }
-    const refused = await call(claimRequest(haltClaim({ install_id: install })));
+    const fourth = haltClaim({ install_id: install });
+    const refused = await call(claimRequest(fourth));
     expect(refused.status).toBe(429);
     expect(await signedJson(refused)).toMatchObject({
       v: 1,
       error: "rate_limited",
       retry_after_s: secondsUntilNextUtcDay(NOW),
+      report_id: fourth.report_id,
     });
     expect(await reportCount()).toBe(3);
 
