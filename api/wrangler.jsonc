@@ -1,0 +1,64 @@
+// D2Vita crash-report API — Cloudflare Worker configuration.
+//
+// PLACEHOLDERS: every value marked REPLACE_AT_DEPLOY must be filled in on the
+// maintainer's machine right before the first deploy (see README.md). They are
+// intentionally invalid so an accidental deploy fails instead of binding the
+// wrong database. Local tests and `wrangler dev --local` do not need real ids.
+//
+// Secrets are NEVER written here. Set them with `wrangler secret put` (see
+// README.md): ADMIN_TOKEN_SHA256, UPLOAD_TOKEN_KEY, RESPONSE_SIGNING_KEY,
+// INSTALL_HASH_KEY, TURNSTILE_SECRET, and optionally TELEGRAM_BOT_TOKEN and
+// TELEGRAM_CHAT_ID.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "d2vita-crash",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-15",
+  "workers_dev": true,
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+  "vars": {
+    "ALLOWED_ORIGIN": "https://franckrst.github.io"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "d2vita_crash",
+      "database_id": "REPLACE_AT_DEPLOY-d2vita_crash-database-id",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACTS",
+      "bucket_name": "d2vita-crash-artifacts"
+    }
+  ],
+  "env": {
+    "staging": {
+      "name": "d2vita-crash-staging",
+      "workers_dev": true,
+      "triggers": {
+        "crons": ["0 3 * * *"]
+      },
+      "vars": {
+        "ALLOWED_ORIGIN": "https://franckrst.github.io"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "d2vita_crash_staging",
+          "database_id": "REPLACE_AT_DEPLOY-d2vita_crash_staging-database-id",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "ARTIFACTS",
+          "bucket_name": "d2vita-crash-artifacts-staging"
+        }
+      ]
+    }
+  }
+}
