@@ -148,7 +148,7 @@ the length of the sample lease).
 | GET | `/v1/admin/bugs?status=&limit=&cursor=`, `/v1/admin/bugs/{id}` | bug reports |
 | PATCH | `/v1/admin/bugs/{id}` | `status`, `issue_url`, `note` |
 | POST | `/v1/admin/builds` | `{build_id, version, channel}` (201 created, 200 updated) |
-| DELETE | `/v1/admin/installs/{install_id}` | erase the claims and pieces of one installation |
+| DELETE | `/v1/admin/installs/{install_id}` | erase the claims and pieces of one installation: `200 {done: true, deleted_reports, deleted_artifacts}`, or `202 {done: false, …}` when the run hit its D1 statement budget — **call again until it answers 200** (counts are per call) |
 | GET | `/v1/admin/stats` | today's global quota use, totals, settings |
 | PUT | `/v1/admin/settings` | `{accepting, disable_until_unix, caps: {…}}` |
 
@@ -210,10 +210,20 @@ so the daily worst case stays near 25 000 writes (free quota: 100 000).
 
 ### Retention (cron)
 
-Rate counters and IP salts after two days; pieces of signatures `fixed` or
-`ignored` for 90 days; orphan pieces (upload window closed, not a stored
-sample); claims older than 180 days with their pieces (aggregate counters
-stay); bugs older than one year.
+Rate counters and IP salts after two days; bugs older than one year; claims
+older than 180 days with their pieces (aggregate counters stay); orphan pieces
+(upload window closed, not a stored sample); pieces of signatures `fixed` or
+`ignored` for 90 days — in that order.
+
+D1 on the Workers Free plan allows 50 queries per invocation, and the limit
+applies to each statement of a batch. The cron and the erasure route therefore
+spend at most 40 statements (`src/maintenance.ts`), work set-based where they
+can, and stop cleanly when the budget runs out: rows are only deleted once
+their pieces are gone, and the next run (the next day for the cron, the next
+call for erasure) continues. An idle cron run executes 11 statements and needs
+14 of its budget (a piece-purge round reserves two before it knows whether
+anything is left); each round of up to 50 reports whose pieces it deletes adds
+two. The summary it logs says `complete`.
 
 ## Configuration
 

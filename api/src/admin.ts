@@ -6,6 +6,7 @@ import { fromBase64Url, fromHex, installHash, sha256, timingSafeEqual, toBase64U
 import { requireSecret, type Env } from "./env";
 import { error, json, readBoundedJson } from "./http";
 import { SCOPE, loadSettings, saveSettings, utcDay, type Settings } from "./limits";
+import { StatementBudget, purgePieces } from "./maintenance";
 import { ARTIFACT_NAMES, KINDS, type ArtifactName } from "./types";
 import { artifactKey } from "./uploads";
 import { validateBugPatch, validateBuildRegistration, validateSettingsPatch, validateSignaturePatch } from "./validate";
@@ -443,22 +444,22 @@ export async function postBuild(
 
 const INSTALL_ID = /^[0-9a-f]{32}$/;
 
+export interface Erasure {
+  done: boolean;
+  deleted_reports: number;
+  deleted_artifacts: number;
+}
+
 // GDPR erasure: claims and sealed pieces of one installation. Aggregate
 // counters (count, per-build counts) stay; distinct consoles lose this one.
-// Safe to re-run if interrupted.
-export async function deleteInstall(
-  _request: Request,
-  env: Env,
-  _ctx: ExecutionContext,
-  _now: number,
-  params: string[],
-): Promise<Response> {
-  const installId = params[0] ?? "";
-  if (!INSTALL_ID.test(installId)) return error(400, "invalid_payload", "install_id: must be 32 lower-case hex characters");
-  const hash = await installHash(requireSecret(env.INSTALL_HASH_KEY, "INSTALL_HASH_KEY"), installId);
+// Bounded by a D1 statement budget: when it runs out, `done` is false and a
+// new run continues (every step is safe to repeat).
+export async function eraseInstall(env: Env, hash: string, budget = new StatementBudget()): Promise<Erasure> {
   const db = env.DB;
   const ofInstall = "SELECT report_id FROM reports WHERE install_hash = ?1";
+  const erasure: Erasure = { done: false, deleted_reports: 0, deleted_artifacts: 0 };
 
+  if (!budget.take(5)) return erasure;
   await db.batch([
     // A stored sample and a lease can belong to different installations (after
     // a resample): only what belongs to this one is cleared.
@@ -479,28 +480,30 @@ export async function deleteInstall(
     db.prepare("DELETE FROM rate_counters WHERE subject = ?1").bind(hash),
   ]);
 
-  let deletedReports = 0;
-  let deletedArtifacts = 0;
-  for (;;) {
-    const { results } = await db
-      .prepare("SELECT report_id, signature, artifacts FROM reports WHERE install_hash = ?1 LIMIT 50")
-      .bind(hash)
-      .all<{ report_id: string; signature: string; artifacts: string }>();
-    if (results.length === 0) break;
-    const keys = results.flatMap((r) =>
-      Object.keys(JSON.parse(r.artifacts) as object).map((name) => artifactKey(r.signature, r.report_id, name)),
-    );
-    // Pieces first: an interrupted run leaves rows that a re-run cleans up.
-    if (keys.length > 0) await env.ARTIFACTS.delete(keys);
-    const ids = results.map((r) => r.report_id);
-    await db
-      .prepare(`DELETE FROM reports WHERE report_id IN (${ids.map((_, i) => `?${i + 1}`).join(", ")})`)
-      .bind(...ids)
-      .run();
-    deletedReports += results.length;
-    deletedArtifacts += keys.length;
-  }
-  return json({ deleted_reports: deletedReports, deleted_artifacts: deletedArtifacts });
+  // Pieces first; the rows go in one statement once none has pieces left.
+  const pieces = await purgePieces(env, budget, "install_hash = ?1", [hash]);
+  erasure.deleted_artifacts = pieces.deleted;
+  if (!pieces.done || !budget.take(1)) return erasure;
+  const rows = await db.prepare("DELETE FROM reports WHERE install_hash = ?1 AND artifacts = '{}'").bind(hash).run();
+  erasure.deleted_reports = rows.meta.changes;
+  erasure.done = true;
+  return erasure;
+}
+
+// DELETE /v1/admin/installs/{install_id}: 200 when the erasure is complete,
+// 202 (done false) when it must be called again.
+export async function deleteInstall(
+  _request: Request,
+  env: Env,
+  _ctx: ExecutionContext,
+  _now: number,
+  params: string[],
+): Promise<Response> {
+  const installId = params[0] ?? "";
+  if (!INSTALL_ID.test(installId)) return error(400, "invalid_payload", "install_id: must be 32 lower-case hex characters");
+  const hash = await installHash(requireSecret(env.INSTALL_HASH_KEY, "INSTALL_HASH_KEY"), installId);
+  const erasure = await eraseInstall(env, hash);
+  return json({ ...erasure }, erasure.done ? 200 : 202);
 }
 
 function publicSettings(settings: Settings) {

@@ -4,7 +4,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { runCron } from "../src/cron";
 import worker from "../src/index";
 import { utcDay } from "../src/limits";
+import { STATEMENT_BUDGET, StatementBudget } from "../src/maintenance";
 import { artifactKey } from "../src/uploads";
+import { countStatements } from "./d1-counter";
 import { ulid } from "./fixtures";
 import { NOW, resetDatabase, signatureRow } from "./helpers";
 
@@ -178,6 +180,42 @@ describe("runCron retention (spec section 5.6)", () => {
     await env.DB.batch([insert("BAAAAAAAAAAAAAAAA", T - 366 * DAY), insert("BBBBBBBBBBBBBBBBB", T - 364 * DAY)]);
     expect(await runCron(env, T)).toMatchObject({ bugs: 1 });
     expect((await env.DB.prepare("SELECT id FROM bugs").all()).results).toEqual([{ id: "BBBBBBBBBBBBBBBBB" }]);
+  });
+
+  it("stays within the D1 statement budget however many closed families reach 90 days", async () => {
+    expect(STATEMENT_BUDGET).toBeLessThanOrEqual(45); // Workers Free: 50 D1 queries per invocation
+    const closed: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      const sig = await insertSignature({ status: "fixed", status_changed_at: T - 91 * DAY, sample_state: "stored" });
+      await insertReport({ signature: sig, received_at: T - 100 * DAY, pieces: ["crash_log", "boot_progress"], sample_stored: 1 });
+      closed.push(sig);
+    }
+    const counted = countStatements(env.DB);
+    const summary = await runCron({ ...env, DB: counted.db }, T);
+    expect(summary).toMatchObject({ complete: true, closed_signatures: 12, closed_artifacts: 24 });
+    expect(counted.statements()).toBeLessThanOrEqual(STATEMENT_BUDGET);
+    expect(await objectCount()).toBe(0);
+    for (const sig of closed) expect(await signatureRow(sig)).toMatchObject({ sample_purged_at: T });
+  });
+
+  it("stops cleanly when its statement budget runs out, and the next run finishes", async () => {
+    const open = await insertSignature({ status: "open", sample_state: "stored" });
+    for (let i = 0; i < 120; i++) await insertReport({ signature: open, received_at: T - 200 * DAY, pieces: ["crash_log"] });
+    const reportCount = async () => (await env.DB.prepare("SELECT COUNT(*) AS n FROM reports").first<{ n: number }>())!.n;
+
+    const counted = countStatements(env.DB);
+    const partial = await runCron({ ...env, DB: counted.db }, T, new StatementBudget(7));
+    expect(partial.complete).toBe(false);
+    expect(counted.statements()).toBeLessThanOrEqual(7);
+    // Pieces go first; no claim row is deleted while pieces of old claims remain.
+    expect(partial.old_report_artifacts).toBe(100);
+    expect(await objectCount()).toBe(20);
+    expect(await reportCount()).toBe(120);
+
+    const rest = await runCron(env, T);
+    expect(rest).toMatchObject({ complete: true, old_report_artifacts: 20, old_reports: 120 });
+    expect(await objectCount()).toBe(0);
+    expect(await reportCount()).toBe(0);
   });
 
   it("is run by the scheduled handler with the trigger time", async () => {

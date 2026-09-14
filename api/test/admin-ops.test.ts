@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { eraseInstall } from "../src/admin";
 import { installHash } from "../src/crypto";
+import { StatementBudget } from "../src/maintenance";
 import { admin, adminRequest, sendClaim, sigOf } from "./admin-helpers";
 import { BUILD_ID, bugBody, haltClaim, installId } from "./fixtures";
 import {
@@ -72,7 +74,7 @@ describe("DELETE /v1/admin/installs/{install_id}", () => {
 
     const res = await admin("DELETE", `/v1/admin/installs/${x}`);
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ v: 1, deleted_reports: 2, deleted_artifacts: 3 });
+    expect(res.body).toEqual({ v: 1, done: true, deleted_reports: 2, deleted_artifacts: 3 });
 
     const reports = await env.DB.prepare("SELECT report_id FROM reports").all();
     expect(reports.results).toEqual([{ report_id: kept.report_id }]);
@@ -135,9 +137,27 @@ describe("DELETE /v1/admin/installs/{install_id}", () => {
     expect((await admin("DELETE", "/v1/admin/installs/NOT-AN-ID")).status).toBe(400);
     expect((await admin("DELETE", `/v1/admin/installs/${installId()}`)).body).toEqual({
       v: 1,
+      done: true,
       deleted_reports: 0,
       deleted_artifacts: 0,
     });
+  });
+
+  it("works in bounded steps: a run out of statements is not done, and the next one finishes", async () => {
+    await registerBuild();
+    const x = installId();
+    for (const code of [1, 2, 3]) await storeSample(haltClaim({ install_id: x, features: { code, frames: [] } }));
+    const hash = await installHash(env.INSTALL_HASH_KEY!, x);
+
+    const partial = await eraseInstall(env, hash, new StatementBudget(7));
+    expect(partial).toEqual({ done: false, deleted_reports: 0, deleted_artifacts: 9 });
+    // Rows stay until their pieces are known to be gone.
+    const rows = await env.DB.prepare("SELECT COUNT(*) AS n FROM reports WHERE install_hash = ?1").bind(hash).first();
+    expect(rows).toEqual({ n: 3 });
+
+    const rest = await admin("DELETE", `/v1/admin/installs/${x}`);
+    expect(rest).toEqual({ status: 200, body: { v: 1, done: true, deleted_reports: 3, deleted_artifacts: 0 } });
+    expect((await env.ARTIFACTS.list({ prefix: "artifacts/" })).objects).toHaveLength(0);
   });
 });
 
