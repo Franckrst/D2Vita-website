@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en" class="i18n-pending">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title data-i18n="page.privacy.title"></title>
+  <meta name="description" data-i18n-attr="content:page.privacy.description">
+  <script type="module" src="assets/main.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip"></a>
+
+  <header class="masthead">
+    <a class="wordmark" href="./" data-i18n="site.name"></a>
+    <nav class="masthead__nav" data-i18n-attr="aria-label:nav.label">
+      <ul>
+        <li><a href="./" data-i18n="nav.home"></a></li>
+        <li><a href="bug.html" data-i18n="nav.bug"></a></li>
+        <li><a href="privacy.html" aria-current="page" data-i18n="nav.privacy"></a></li>
+      </ul>
+    </nav>
+    <button type="button" class="lang-toggle" data-lang-toggle data-i18n="lang.toggle" data-i18n-attr="aria-label:lang.toggle.aria"></button>
+  </header>
+
+  <main id="main" class="page page--privacy">
+    <header class="page-head">
+      <h1 data-i18n="privacy.title"></h1>
+      <p class="page-head__meta" data-i18n="privacy.updated"></p>
+      <p class="lede" data-i18n="privacy.intro"></p>
+    </header>
+
+    <section class="glance" aria-labelledby="glance-title">
+      <h2 id="glance-title" class="label" data-i18n="privacy.glance.title"></h2>
+      <ul class="glance__list">
+        <li data-i18n="privacy.glance.consent"></li>
+        <li data-i18n="privacy.glance.sealed"></li>
+        <li data-i18n="privacy.glance.secrets"></li>
+        <li data-i18n="privacy.glance.ip"></li>
+        <li data-i18n="privacy.glance.delete"></li>
+      </ul>
+    </section>
+
+    <nav class="toc" aria-labelledby="toc-title">
+      <h2 id="toc-title" class="label" data-i18n="privacy.toc.title"></h2>
+      <ol class="toc__list">
+        <li><a href="#when" data-i18n="privacy.when.title"></a></li>
+        <li><a href="#choice" data-i18n="privacy.choice.title"></a></li>
+        <li><a href="#summary" data-i18n="privacy.claim.title"></a></li>
+        <li><a href="#attachments" data-i18n="privacy.attach.title"></a></li>
+        <li><a href="#scrubbing" data-i18n="privacy.redact.title"></a></li>
+        <li><a href="#encryption" data-i18n="privacy.crypto.title"></a></li>
+        <li><a href="#retention" data-i18n="privacy.server.title"></a></li>
+        <li><a href="#issues" data-i18n="privacy.issues.title"></a></li>
+        <li><a href="#bugs" data-i18n="privacy.bugs.title"></a></li>
+        <li><a href="#site" data-i18n="privacy.site.title"></a></li>
+        <li><a href="#deletion" data-i18n="privacy.delete.title"></a></li>
+      </ol>
+    </nav>
+
+    <section class="chapter" id="when" aria-labelledby="when-title">
+      <h2 id="when-title" class="chapter__title" data-i18n="privacy.when.title"></h2>
+      <div class="chapter__body">
+        <p data-i18n="privacy.when.p1"></p>
+        <p data-i18n="privacy.when.p2"></p>
+        <p data-i18n="privacy.when.p3"></p>
+      </div>
+    </section>
+
+    <section class="chapter" id="choice" aria-labelledby="choice-title">
+      <h2 id="choice-title" class="chapter__title" data-i18n="privacy.choice.title"></h2>
+      <div class="chapter__body">
+        <p data-i18n="privacy.choice.intro"></p>
+        <ul class="choices">
+          <li data-i18n="privacy.choice.send"></li>
+          <li data-i18n="privacy.choice.decline"></li>
+          <li data-i18n="privacy.choice.always"></li>
+        </ul>
+        <p data-i18n="privacy.choice.later"></p>
+        <p data-i18n="privacy.choice.off"></p>
+        <p data-i18n="privacy.choice.scripted"></p>
+        <p data-i18n="privacy.choice.installId"></p>
+      </div>
+    </section>
+
+    <section class="chapter" id="summary" aria-labelledby="summary-title">
+      <h2 id="summary-title" class="chapter__title" data-i18n="privacy.claim.title"></h2>
+      <div class="chapter__body">
+        <p data-i18n="privacy.claim.intro"></p>
+        <dl class="ledger">
+          <div class="ledger__row">
+            <dt data-i18n="privacy.claim.reportId.term"></dt>
+            <dd data-i18n="privacy.claim.reportId.desc"></dd>
+          </div>
+          <div class="ledger__row">
+            <dt data-i18n="privacy.claim.installId.term"></dt>
+            <dd data-i18n="privacy.claim.installId.desc"></dd>
+          </div>
+          <div class="ledger__row">
+            <dt data-i18n="privacy.claim.build.term"></dt>
+            <dd data-i18n="privacy.claim.build.desc"></dd>
+          </div>
+          <div class="ledger__row">
+            <dt data-i18n="privacy.claim.platform.term"></dt>
+            <dd data-i18n="privacy.claim.platform.desc"></dd>
+          </div>
+          <div class="ledger__row">
+            <dt data-i18n="privacy.claim.session.term"></dt>
+            <dd data-i18n="privacy.claim.session.desc"></dd>
+          </div>
+          <div class="ledger__row">
+            <dt data-i18n="privacy.claim.kind.term"></dt>
+            <dd data-i18n="privacy.claim.kind.desc"></dd>
+          </div>
+          <div class="ledger__row">
+            <dt data-i18n="privacy.claim.features.term"></dt>
+            <dd data-i18n="privacy.claim.features.desc"></dd>
+          </div>
+          <div class="ledger__row">
+            <dt data-i18n="privacy.claim.artifacts.term"></dt>
+            <dd data-i18n="privacy.claim.artifacts.desc"></dd>
+          </div>
+        </dl>
+        <p data-i18n="privacy.claim.headers"></p>
+      </div>
+    </section>
+
+    <section class="chapter" id="attachments" aria-labelledby="attachments-title">
+      <h2 id="attachments-title" class="chapter__title" data-i18n="privacy.attach.title"></h2>
+      <div class="chapter__body">
+        <p data-i18n="privacy.attach.intro"></p>
+        <div class="table-wrap">
+          <table class="pieces">
+            <thead>
+              <tr>
+                <th scope="col" data-i18n="privacy.attach.col.name"></th>
+                <th scope="col" data-i18n="privacy.attach.col.content"></th>
+                <th scope="col" data-i18n="privacy.attach.col.max"></th>
+                <th scope="col" data-i18n="privacy.attach.col.when"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row" data-i18n="privacy.attach.dump.name"></th>
+                <td data-i18n="privacy.attach.dump.content" data-i18n-attr="data-label:privacy.attach.col.content"></td>
+                <td data-i18n="privacy.attach.dump.max" data-i18n-attr="data-label:privacy.attach.col.max"></td>
+                <td data-i18n="privacy.attach.dump.when" data-i18n-attr="data-label:privacy.attach.col.when"></td>
+              </tr>
+              <tr>
+                <th scope="row" data-i18n="privacy.attach.crashTxt.name"></th>
+                <td data-i18n="privacy.attach.crashTxt.content" data-i18n-attr="data-label:privacy.attach.col.content"></td>
+                <td data-i18n="privacy.attach.crashTxt.max" data-i18n-attr="data-label:privacy.attach.col.max"></td>
+                <td data-i18n="privacy.attach.crashTxt.when" data-i18n-attr="data-label:privacy.attach.col.when"></td>
+              </tr>
+              <tr>
+                <th scope="row" data-i18n="privacy.attach.crashLog.name"></th>
+                <td data-i18n="privacy.attach.crashLog.content" data-i18n-attr="data-label:privacy.attach.col.content"></td>
+                <td data-i18n="privacy.attach.crashLog.max" data-i18n-attr="data-label:privacy.attach.col.max"></td>
+                <td data-i18n="privacy.attach.crashLog.when" data-i18n-attr="data-label:privacy.attach.col.when"></td>
+              </tr>
+              <tr>
+                <th scope="row" data-i18n="privacy.attach.progress.name"></th>
+                <td data-i18n="privacy.attach.progress.content" data-i18n-attr="data-label:privacy.attach.col.content"></td>
+                <td data-i18n="privacy.attach.progress.max" data-i18n-attr="data-label:privacy.attach.col.max"></td>
+                <td data-i18n="privacy.attach.progress.when" data-i18n-attr="data-label:privacy.attach.col.when"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="footnote" data-i18n="privacy.attach.sizes"></p>
+        <p data-i18n="privacy.attach.resample"></p>
+        <p data-i18n="privacy.attach.outbox"></p>
+      </div>
+    </section>
+
+    <section class="chapter" id="scrubbing" aria-labelledby="scrubbing-title">
+      <h2 id="scrubbing-title" class="chapter__title" data-i18n="privacy.redact.title"></h2>
+      <div class="chapter__body">
+        <p data-i18n="privacy.redact.p1"></p>
+        <p data-i18n="privacy.redact.p2"></p>
+        <p data-i18n="privacy.redact.p3"></p>
+      </div>
+    </section>
+
+    <section class="chapter" id="encryption" aria-labelledby="encryption-title">
+      <h2 id="encryption-title" class="chapter__title" data-i18n="privacy.crypto.title"></h2>
+      <div class="chapter__body">
+        <p data-i18n="privacy.crypto.sealed"></p>
+        <p data-i18n="privacy.crypto.http"></p>
+        <p data-i18n="privacy.crypto.signed"></p>
+      </div>
+    </section>
+
+    <section class="chapter" id="retention" aria-labelledby="retention-title">
+      <h2 id="retention-title" class="chapter__title" data-i18n="privacy.server.title"></h2>
+      <div class="chapter__body">
+        <p data-i18n="privacy.server.host"></p>
+        <p data-i18n="privacy.server.dedup"></p>
+        <p data-i18n="privacy.server.ip"></p>
+        <h3 class="label" data-i18n="privacy.retention.heading"></h3>
+        <dl class="ledger">
+          <div class="ledger__row">
+            <dt data-i18n="privacy.retention.limits.term"></dt>
+            <dd data-i18n="privacy.retention.limits.desc"></dd>
+          </div>
+          <div class="ledger__row">
+            <dt data-i18n="privacy.retention.reports.term"></dt>
+            <dd data-i18n="privacy.retention.reports.desc"></dd>
+          </div>
+          <div class="ledger__row">
+            <dt data-i18n="privacy.retention.artifacts.term"></dt>
+            <dd data-i18n="privacy.retention.artifacts.desc"></dd>
+          </div>
+          <div class="ledger__row">
+            <dt data-i18n="privacy.retention.bugs.term"></dt>
+            <dd data-i18n="privacy.retention.bugs.desc"></dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="chapter" id="issues" aria-labelledby="issues-title">
+      <h2 id="issues-title" class="chapter__title" data-i18n="privacy.issues.title"></h2>
+      <div class="chapter__body">
+        <p data-i18n="privacy.issues.p1"></p>
+      </div>
+    </section>
+
+    <section class="chapter" id="bugs" aria-labelledby="bugs-title">
+      <h2 id="bugs-title" class="chapter__title" data-i18n="privacy.bugs.title"></h2>
+      <div class="chapter__body">
+        <p data-i18n="privacy.bugs.sent"></p>
+        <p data-i18n="privacy.bugs.turnstile"></p>
+        <p data-i18n="privacy.bugs.limits"></p>
+        <p data-i18n="privacy.bugs.public"></p>
+      </div>
+    </section>
+
+    <section class="chapter" id="site" aria-labelledby="site-title">
+      <h2 id="site-title" class="chapter__title" data-i18n="privacy.site.title"></h2>
+      <div class="chapter__body">
+        <p data-i18n="privacy.site.p1"></p>
+      </div>
+    </section>
+
+    <section class="chapter" id="deletion" aria-labelledby="deletion-title">
+      <h2 id="deletion-title" class="chapter__title" data-i18n="privacy.delete.title"></h2>
+      <div class="chapter__body">
+        <p data-i18n="privacy.delete.p1"></p>
+        <p data-i18n="privacy.delete.p2"></p>
+        <p data-i18n="privacy.delete.p3"></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="colophon">
+    <ul class="colophon__links">
+      <li><a href="https://github.com/Franckrst/D2Vita/releases" data-i18n="footer.releases"></a></li>
+      <li><a href="https://github.com/Franckrst/D2Vita/issues" data-i18n="footer.issues"></a></li>
+      <li><a href="privacy.html" data-i18n="footer.privacy"></a></li>
+    </ul>
+    <p class="colophon__legal" data-i18n="footer.legal"></p>
+  </footer>
+</body>
+</html>

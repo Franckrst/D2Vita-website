@@ -55,6 +55,30 @@ describe("dictionaries", () => {
   });
 });
 
+describe("typography", () => {
+  const dicts = Object.fromEntries(LANGUAGES.map((l) => [l, loadDict(l)]));
+  // Prose only: drop `code` spans and link targets, which follow other rules.
+  const prose = (s) => s.replace(/`[^`]*`/g, "").replace(/\]\([^)]*\)/g, "]");
+
+  it("French puts a non-breaking space before : ; ! ? » and after «", () => {
+    for (const [key, value] of Object.entries(dicts.fr)) {
+      // The trademark keeps its official spelling.
+      const text = prose(value).replaceAll("Diablo II: Lord of Destruction", "");
+      expect(/[ \t][:;!?»]/.test(text), `${key}: ordinary space before punctuation`).toBe(false);
+      expect(/«[ \t]/.test(text), `${key}: ordinary space after «`).toBe(false);
+      expect(/[^\s  ][:;!?»]/.test(text), `${key}: missing space before punctuation`).toBe(false);
+    }
+  });
+
+  it("uses typographic apostrophes and quotation marks", () => {
+    for (const lang of LANGUAGES) {
+      for (const [key, value] of Object.entries(dicts[lang])) {
+        expect(/['"]/.test(prose(value)), `${lang}:${key}`).toBe(false);
+      }
+    }
+  });
+});
+
 describe("detectLanguage", () => {
   it("prefers a valid stored choice", () => {
     expect(detectLanguage({ stored: "en", preferred: ["fr-FR"] })).toBe("en");

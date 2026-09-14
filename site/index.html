@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en" class="i18n-pending">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title data-i18n="page.home.title"></title>
+  <meta name="description" data-i18n-attr="content:page.home.description">
+  <script type="module" src="assets/main.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip"></a>
+
+  <header class="masthead">
+    <a class="wordmark" href="./" data-i18n="site.name"></a>
+    <nav class="masthead__nav" data-i18n-attr="aria-label:nav.label">
+      <ul>
+        <li><a href="./" aria-current="page" data-i18n="nav.home"></a></li>
+        <li><a href="bug.html" data-i18n="nav.bug"></a></li>
+        <li><a href="privacy.html" data-i18n="nav.privacy"></a></li>
+      </ul>
+    </nav>
+    <button type="button" class="lang-toggle" data-lang-toggle data-i18n="lang.toggle" data-i18n-attr="aria-label:lang.toggle.aria"></button>
+  </header>
+
+  <main id="main" class="page page--home">
+    <section class="title-page" aria-labelledby="home-title">
+      <p class="kicker" data-i18n="home.kicker"></p>
+      <h1 id="home-title" class="title-page__name" data-i18n="home.title"></h1>
+      <p class="lede" data-i18n="home.lede"></p>
+    </section>
+
+    <section class="contents" aria-labelledby="contents-title">
+      <h2 id="contents-title" class="label" data-i18n="home.links.heading"></h2>
+      <ul class="contents__list">
+        <li>
+          <a class="contents__row" href="https://github.com/Franckrst/D2Vita/releases">
+            <span class="contents__title" data-i18n="home.links.releases.title"></span>
+            <span class="contents__desc" data-i18n="home.links.releases.desc"></span>
+          </a>
+        </li>
+        <li>
+          <a class="contents__row" href="https://github.com/Franckrst/D2Vita/issues">
+            <span class="contents__title" data-i18n="home.links.issues.title"></span>
+            <span class="contents__desc" data-i18n="home.links.issues.desc"></span>
+          </a>
+        </li>
+        <li>
+          <a class="contents__row" href="bug.html">
+            <span class="contents__title" data-i18n="home.links.bug.title"></span>
+            <span class="contents__desc" data-i18n="home.links.bug.desc"></span>
+          </a>
+        </li>
+        <li>
+          <a class="contents__row" href="privacy.html">
+            <span class="contents__title" data-i18n="home.links.privacy.title"></span>
+            <span class="contents__desc" data-i18n="home.links.privacy.desc"></span>
+          </a>
+        </li>
+      </ul>
+    </section>
+
+    <section class="aside-note" aria-labelledby="crash-title">
+      <h2 id="crash-title" data-i18n="home.crash.title"></h2>
+      <p data-i18n="home.crash.body"></p>
+      <p><a href="privacy.html" data-i18n="home.crash.link"></a></p>
+    </section>
+  </main>
+
+  <footer class="colophon">
+    <ul class="colophon__links">
+      <li><a href="https://github.com/Franckrst/D2Vita/releases" data-i18n="footer.releases"></a></li>
+      <li><a href="https://github.com/Franckrst/D2Vita/issues" data-i18n="footer.issues"></a></li>
+      <li><a href="privacy.html" data-i18n="footer.privacy"></a></li>
+    </ul>
+    <p class="colophon__legal" data-i18n="footer.legal"></p>
+  </footer>
+</body>
+</html>
