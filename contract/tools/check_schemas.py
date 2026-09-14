@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""Check the D2Vita contract v1 schemas.
+"""Check the D2Vita contract v1 schemas and signature vectors.
 
     python3 contract/tools/check_schemas.py
 
-Needs the `jsonschema` package. When it is missing and contract/.venv exists,
-the script re-runs itself with the venv interpreter (see contract/README.md).
+This file is also the reference implementation of the signature rules
+(contract/signature-rules.v1.md): canon(), signature_id(). That part only
+needs the standard library, so gen_vectors.py can import it anywhere.
+
+Validation needs the `jsonschema` package. When it is missing and
+contract/.venv exists, the script re-runs itself with the venv interpreter
+(see contract/README.md).
 """
+import base64
 import functools
+import hashlib
 import json
 import os
 import re
@@ -22,6 +29,105 @@ VENV_HINT = (
     "the jsonschema package is missing: run `make -C contract venv` "
     "(or see contract/README.md), then retry"
 )
+
+
+# --------------------------------------------------------------------------
+# Signature rules v1 (reference implementation of signature-rules.v1.md)
+# --------------------------------------------------------------------------
+
+RULES_VERSION = 1
+
+# (selector, template). The selector is the claim kind, followed by
+# "/<features.pc.region>" for host_fault. signature-rules.v1.md reproduces
+# this table verbatim (checked by the test suite).
+SIGNATURE_TEMPLATES = (
+    ("halt", "halt|{features.code}|{features.location}|{features.frames:3}"),
+    ("guest_fault", "gfault|{features.exception}|{features.eip}|{features.frames:2}"),
+    ("host_fault/jit", "hfault_jit|{features.stop_reason}|{features.guest_frames:3}"),
+    ("host_fault/eboot", "hfault|{build_id}|{features.pc.offset}|{features.lr.offset}"),
+    ("host_fault/sysmodule", "hfault_sys|{features.pc.module}|{features.pc.offset}"),
+    ("host_fault/unknown", "hfault_unknown|{build_id}|{features.pc.offset}|{features.lr.offset}"),
+    ("abnormal_exit", "exit|{features.reason}|{features.import ?? features.code}|{features.frames:1}"),
+    ("hang", "hang|{features.eip}"),
+)
+
+ABSENT = "-"
+_PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
+_PATH = r"[a-z_]+(?:\.[a-z_]+)*"
+_LIST_EXPRESSION = re.compile(rf"\A({_PATH}):([1-9][0-9]*)\Z")
+_PATH_EXPRESSION = re.compile(rf"\A{_PATH}\Z")
+
+
+def _lookup(document, path):
+    value = document
+    for key in path.split("."):
+        if not isinstance(value, dict):
+            raise TypeError(f"{path}: {key!r} is looked up in a non-object")
+        value = value[key]  # KeyError when absent: templates only name required fields
+    return value
+
+
+def _format_scalar(value, path):
+    if value is None:
+        return ABSENT
+    if isinstance(value, bool):
+        raise TypeError(f"{path}: booleans are not used by templates")
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        # JSON 1420.0 and 1.42e3 are the integer 1420 (JSON Schema "integer").
+        if not value.is_integer():
+            raise ValueError(f"{path}: {value!r} is not an integer")
+        return str(int(value))
+    if isinstance(value, str):
+        return value
+    raise TypeError(f"{path}: {type(value).__name__} is not a scalar")
+
+
+def _expand(expression, document):
+    list_match = _LIST_EXPRESSION.match(expression)
+    if list_match:
+        path, count = list_match.group(1), int(list_match.group(2))
+        items = _lookup(document, path)
+        if not isinstance(items, list) or not all(isinstance(item, str) for item in items):
+            raise TypeError(f"{path}: expected an array of strings")
+        return ",".join(items[:count]) if items else ABSENT
+    alternatives = [part.strip() for part in expression.split("??")]
+    if not all(_PATH_EXPRESSION.match(path) for path in alternatives):
+        raise ValueError(f"malformed placeholder {{{expression}}}")
+    for path in alternatives:
+        value = _lookup(document, path)
+        if isinstance(value, (dict, list)):
+            raise TypeError(f"{path}: expected a scalar")
+        if value is not None:
+            return _format_scalar(value, path)
+    return ABSENT
+
+
+def render_template(template, document):
+    """Expand every {placeholder} of a signature template."""
+    return _PLACEHOLDER.sub(lambda match: _expand(match.group(1), document), template)
+
+
+def template_for(claim):
+    selector = claim.get("kind")
+    if selector == "host_fault":
+        selector = f"host_fault/{claim['features']['pc']['region']}"
+    for candidate, template in SIGNATURE_TEMPLATES:
+        if candidate == selector:
+            return template
+    raise ValueError(f"no signature template for {selector!r}")
+
+
+def canon(claim):
+    """Canonical string of a claim that is valid against claim.v1.schema.json."""
+    return render_template(template_for(claim), claim)
+
+
+def signature_id(canon_string):
+    """"S" + base32(sha256(utf8(canon)))[0:15], RFC 4648 alphabet, no padding."""
+    digest = hashlib.sha256(canon_string.encode("utf-8")).digest()
+    return "S" + base64.b32encode(digest).decode("ascii")[:15]
 
 
 # --------------------------------------------------------------------------
