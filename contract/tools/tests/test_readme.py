@@ -3,6 +3,8 @@ import subprocess
 import unittest
 
 import check_schemas
+import gen_vectors
+from tests.helpers import DESIGN_SEALED_CAPS, KIB, MIB
 
 CONTRACT_DIR = check_schemas.CONTRACT_DIR
 
@@ -52,6 +54,20 @@ class ReadmeTest(unittest.TestCase):
                 self.assertIn(schema, schemas)
                 if definition:
                     self.assertIn(definition, schemas[schema]["$defs"])
+
+    def test_artifact_caps_table(self):
+        block = re.search(r"<!-- artifact-caps:begin -->(.*?)<!-- artifact-caps:end -->", self.text, re.S)
+        self.assertIsNotNone(block, "artifact caps table not found")
+        rows = re.findall(r"^\| `([a-z_]+)` \| ([0-9]+) \(([0-9]+) (KiB|MiB)\) \| ([0-9]+) \|", block.group(1), re.M)
+        self.assertEqual(sorted(DESIGN_SEALED_CAPS), sorted(name for name, *_ in rows))
+        for name, sealed, value, unit, plaintext in rows:
+            with self.subTest(artifact=name):
+                cap = DESIGN_SEALED_CAPS[name]
+                self.assertEqual(cap, int(sealed))
+                self.assertEqual(cap, int(value) * {"KiB": KIB, "MiB": MIB}[unit])
+                largest = int(plaintext)
+                self.assertLessEqual(gen_vectors.sealed_size(largest), cap)
+                self.assertGreater(gen_vectors.sealed_size(largest + 1), cap)
 
     def test_monocypher_checksum_matches(self):
         recorded = (CONTRACT_DIR / "tools/c_check/MONOCYPHER_SHA256").read_text().split()

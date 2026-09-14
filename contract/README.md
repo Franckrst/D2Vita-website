@@ -182,7 +182,18 @@ uses the upload token there too.
   (vector `halt_code_written_as_float`).
 - Compute a signature only for a claim that passed validation.
 - `claim.artifacts[].bytes` and `max_bytes` are sealed sizes:
-  `72 + n + 16 * (floor(n / 65536) + 1)` for `n` plaintext bytes.
+  `72 + n + 16 * (floor(n / 65536) + 1)` for `n` plaintext bytes. The caps
+  of design section 4.5, and the largest plaintext that fits under each one
+  with the console's 65536-byte chunks:
+
+<!-- artifact-caps:begin -->
+| Artifact | Sealed cap, bytes | Largest plaintext, bytes |
+|---|---|---|
+| `dump` | 2097152 (2 MiB) | 2096568 |
+| `crash_txt` | 65536 (64 KiB) | 65448 |
+| `crash_log` | 65536 (64 KiB) | 65448 |
+| `boot_progress` | 327680 (320 KiB) | 327528 |
+<!-- artifact-caps:end -->
 
 ## Decisions this contract adds to the design
 
