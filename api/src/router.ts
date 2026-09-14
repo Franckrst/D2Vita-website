@@ -1,6 +1,6 @@
 // Minimal router. `now` (Unix seconds) is injected so tests control the clock.
 
-import { getSignature, isAdmin, listSignatures, unauthorized } from "./admin";
+import { getSignature, isAdmin, listSignatures, patchSignature, unauthorized } from "./admin";
 import { handleBug, handleBugPreflight } from "./bugs";
 import { handleClaim } from "./claims";
 import type { Env } from "./env";
@@ -32,6 +32,7 @@ const routes: Route[] = [
   // Admin (authorization checked in handle() before dispatch)
   { method: "GET", pattern: /^\/v1\/admin\/signatures$/, handler: listSignatures },
   { method: "GET", pattern: /^\/v1\/admin\/signatures\/([^/]+)$/, handler: getSignature },
+  { method: "PATCH", pattern: /^\/v1\/admin\/signatures\/([^/]+)$/, handler: patchSignature },
 ];
 
 // Responses to the console are signed, errors included, so a hostile network

@@ -4,8 +4,11 @@
 
 import { fromBase64Url, fromHex, sha256, timingSafeEqual, toBase64Url, utf8 } from "./crypto";
 import type { Env } from "./env";
-import { error, json } from "./http";
+import { error, json, readBoundedJson } from "./http";
 import { KINDS } from "./types";
+import { validateSignaturePatch } from "./validate";
+
+const ADMIN_BODY_MAX_BYTES = 16 * 1024;
 
 export async function isAdmin(request: Request, env: Env): Promise<boolean> {
   const match = /^Bearer (\S{1,512})$/.exec(request.headers.get("authorization") ?? "");
@@ -181,6 +184,81 @@ export async function signatureDetail(db: D1Database, id: string) {
       sample_stored: r.sample_stored === null ? null : r.sample_stored === 1,
     })),
   };
+}
+
+// Root of a signature's merge chain (chains are kept flat; the hop limit only
+// guards against a corrupted chain).
+async function mergeRoot(db: D1Database, id: string): Promise<string | null> {
+  let current = await db.prepare("SELECT id, merged_into FROM signatures WHERE id = ?1").bind(id).first<Row>();
+  if (!current) return null;
+  for (let hops = 0; current.merged_into && hops < 4; hops++) {
+    const next: Row | null = await db
+      .prepare("SELECT id, merged_into FROM signatures WHERE id = ?1")
+      .bind(current.merged_into)
+      .first<Row>();
+    if (!next) break;
+    current = next;
+  }
+  return current.id as string;
+}
+
+export async function patchSignature(
+  request: Request,
+  env: Env,
+  _ctx: ExecutionContext,
+  now: number,
+  params: string[],
+): Promise<Response> {
+  const id = params[0] ?? "";
+  const body = await readBoundedJson(request, ADMIN_BODY_MAX_BYTES);
+  if (!body.ok) return body.response;
+  const validation = validateSignaturePatch(body.value);
+  if (!validation.ok) return error(400, "invalid_payload", validation.error);
+  const patch = validation.value;
+
+  const db = env.DB;
+  const row = SIGNATURE_ID.test(id)
+    ? await db.prepare("SELECT id, fixed_in_version FROM signatures WHERE id = ?1").bind(id).first<Row>()
+    : null;
+  if (!row) return error(404, "not_found", "No such signature");
+
+  const sets: string[] = [];
+  const binds: unknown[] = [];
+  const set = (column: string, value: unknown) => sets.push(`${column} = ?${binds.push(value)}`);
+
+  if (patch.status !== undefined) {
+    const version = patch.fixed_in_version !== undefined ? patch.fixed_in_version : row.fixed_in_version;
+    if (patch.status === "fixed" && !version) {
+      return error(400, "invalid_payload", "fixed_in_version: required when status is fixed");
+    }
+    set("status", patch.status);
+    set("status_changed_at", now);
+  }
+  if (patch.fixed_in_version !== undefined) set("fixed_in_version", patch.fixed_in_version);
+  if (patch.issue_url !== undefined) set("issue_url", patch.issue_url);
+  if (patch.note !== undefined) set("note", patch.note);
+
+  let newRoot: string | null = null;
+  if (patch.merged_into !== undefined) {
+    if (patch.merged_into !== null) {
+      if (patch.merged_into === id) return error(400, "invalid_payload", "merged_into: cannot merge into itself");
+      newRoot = await mergeRoot(db, patch.merged_into);
+      if (!newRoot) return error(400, "invalid_payload", "merged_into: unknown signature");
+      if (newRoot === id) return error(400, "invalid_payload", "merged_into: would create a cycle");
+    }
+    set("merged_into", newRoot);
+  }
+  if (patch.resample) {
+    set("sample_state", "none");
+    set("lease_report", null);
+    set("lease_expires", null);
+  }
+
+  const statements = [db.prepare(`UPDATE signatures SET ${sets.join(", ")} WHERE id = ?${binds.push(id)}`).bind(...binds)];
+  // Keep chains flat: whatever was merged into this signature follows it.
+  if (newRoot) statements.push(db.prepare("UPDATE signatures SET merged_into = ?1 WHERE merged_into = ?2").bind(newRoot, id));
+  await db.batch(statements);
+  return json({ signature: await signatureDetail(db, id) });
 }
 
 export async function getSignature(
