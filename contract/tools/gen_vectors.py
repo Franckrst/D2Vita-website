@@ -9,6 +9,7 @@ the same bytes. --check regenerates in memory and compares byte for byte.
 Needs only the standard library and PyNaCl (no jsonschema).
 """
 import argparse
+import base64
 import copy
 import hashlib
 import json
@@ -20,6 +21,7 @@ import nacl.bindings as sodium
 import nacl.encoding
 import nacl.exceptions
 import nacl.hash
+import nacl.signing
 
 import check_schemas
 
@@ -525,6 +527,274 @@ def open_sealed(sealed, recipient_sk):
 
 
 # --------------------------------------------------------------------------
+# Sealed vectors
+# --------------------------------------------------------------------------
+
+RECIPIENT_A_SK = label_digest("sealed-recipient-a-secret-key")
+RECIPIENT_B_SK = label_digest("sealed-recipient-b-secret-key")
+
+# (name, recipient secret key, plaintext size, chunk size)
+SEALED_CASES = (
+    ("empty", RECIPIENT_A_SK, 0, 65536),
+    ("one_byte", RECIPIENT_A_SK, 1, 65536),
+    ("exact_chunk", RECIPIENT_A_SK, 16, 16),
+    ("chunk_plus_one", RECIPIENT_A_SK, 17, 16),
+    ("three_chunks", RECIPIENT_A_SK, 40, 16),
+    ("two_chunks_then_empty", RECIPIENT_A_SK, 32, 16),
+    ("chunk_size_one", RECIPIENT_B_SK, 3, 1),
+    ("seventy_thousand_bytes", RECIPIENT_A_SK, 70000, 65536),
+)
+
+
+def _flip(data, index, mask=0x01):
+    changed = bytearray(data)
+    changed[index] ^= mask
+    return bytes(changed)
+
+
+def _replace(data, offset, new):
+    return data[:offset] + new + data[offset + len(new) :]
+
+
+# (name, base positive case, recipient secret key used to open, change, expected failure)
+NEGATIVE_SEALED_CASES = (
+    ("truncated_inside_header", "one_byte", RECIPIENT_A_SK, lambda s: s[:40], "truncated"),
+    ("truncated_empty_last_chunk_removed", "exact_chunk", RECIPIENT_A_SK, lambda s: s[:-16], "truncated"),
+    ("truncated_last_chunk_removed", "chunk_plus_one", RECIPIENT_A_SK, lambda s: s[:-17], "truncated"),
+    ("truncated_one_byte_short", "two_chunks_then_empty", RECIPIENT_A_SK, lambda s: s[:-1], "truncated"),
+    ("cut_inside_last_chunk_is_tampered", "three_chunks", RECIPIENT_A_SK, lambda s: s[:-1], "tampered"),
+    ("tampered_ciphertext_bit", "three_chunks", RECIPIENT_A_SK, lambda s: _flip(s, HEADER_SIZE), "tampered"),
+    ("tampered_last_tag_byte", "one_byte", RECIPIENT_A_SK, lambda s: _flip(s, len(s) - 1, 0x80), "tampered"),
+    ("tampered_nonce_prefix", "three_chunks", RECIPIENT_A_SK, lambda s: _flip(s, 48), "tampered"),
+    ("tampered_ephemeral_public_key", "three_chunks", RECIPIENT_A_SK, lambda s: _flip(s, 21), "tampered"),
+    ("tampered_chunks_swapped", "three_chunks", RECIPIENT_A_SK,
+     lambda s: s[:72] + s[104:136] + s[72:104] + s[136:], "tampered"),
+    ("tampered_trailing_byte", "one_byte", RECIPIENT_A_SK, lambda s: s + b"\x00", "tampered"),
+    ("wrong_key", "one_byte", RECIPIENT_B_SK, lambda s: s, "wrong_key"),
+    ("malformed_magic", "one_byte", RECIPIENT_A_SK, lambda s: _replace(s, 0, b"D2VSEAL2"), "malformed"),
+    ("malformed_magic_takes_precedence_over_wrong_key", "one_byte", RECIPIENT_B_SK,
+     lambda s: _replace(s, 0, b"D2VSEAL0"), "malformed"),
+    ("malformed_reserved_not_zero", "one_byte", RECIPIENT_A_SK, lambda s: _flip(s, 71), "malformed"),
+    ("malformed_chunk_size_zero", "one_byte", RECIPIENT_A_SK,
+     lambda s: _replace(s, 64, struct.pack("<I", 0)), "malformed"),
+    ("malformed_chunk_size_too_large", "one_byte", RECIPIENT_A_SK,
+     lambda s: _replace(s, 64, struct.pack("<I", MAX_CHUNK_SIZE + 1)), "malformed"),
+    ("malformed_low_order_ephemeral_key", "one_byte", RECIPIENT_A_SK,
+     lambda s: _replace(s, 16, bytes(32)), "malformed"),
+)
+
+
+def _writer_bug_cases():
+    """Objects written by broken sealers (no base case)."""
+    pk = sodium.crypto_scalarmult_base(RECIPIENT_A_SK)
+    eph_sk = label_digest("sealed-writer-bug-ephemeral-secret-key")
+    prefix = label_digest("sealed-writer-bug-nonce-prefix")[:NONCE_PREFIX_SIZE]
+    return (
+        ("writer_omits_empty_last_chunk",
+         seal_with_flags(pattern(16), pk, eph_sk, prefix, 16, [16], [1]), "truncated"),
+        ("writer_never_sets_last_flag",
+         seal_with_flags(pattern(17), pk, eph_sk, prefix, 16, [16, 1], [0, 0]), "tampered"),
+    )
+
+
+def sealed_case(name, recipient_sk, size, chunk_size):
+    recipient_pk = sodium.crypto_scalarmult_base(recipient_sk)
+    eph_sk = label_digest(f"sealed-{name}-ephemeral-secret-key")
+    nonce_prefix = label_digest(f"sealed-{name}-nonce-prefix")[:NONCE_PREFIX_SIZE]
+    plaintext = pattern(size)
+    eph_pk = sodium.crypto_scalarmult_base(eph_sk)
+    shared = sodium.crypto_scalarmult(eph_sk, recipient_pk)
+    sealed = seal(plaintext, recipient_pk, eph_sk, nonce_prefix, chunk_size)
+    if open_sealed(sealed, recipient_sk) != plaintext or len(sealed) != sealed_size(size, chunk_size):
+        raise GenerationError(f"{name}: round trip failed")
+    return {
+        "name": name,
+        "recipient_sk_hex": recipient_sk.hex(),
+        "recipient_pk_hex": recipient_pk.hex(),
+        "eph_sk_hex": eph_sk.hex(),
+        "nonce_prefix_hex": nonce_prefix.hex(),
+        "chunk_size": chunk_size,
+        "plaintext_hex": plaintext.hex(),
+        "eph_pk_hex": eph_pk.hex(),
+        "shared_hex": shared.hex(),
+        "key_id_hex": key_id(recipient_pk).hex(),
+        "key_hex": derive_key(shared, eph_pk, recipient_pk).hex(),
+        "sealed_hex": sealed.hex(),
+    }
+
+
+def check_negative_case(case):
+    try:
+        open_sealed(bytes.fromhex(case["sealed_hex"]), bytes.fromhex(case["recipient_sk_hex"]))
+    except OpenError as exc:
+        if exc.kind != case["expect"]:
+            raise GenerationError(f"{case['name']}: opens as {exc.kind}, expected {case['expect']}") from None
+        return
+    raise GenerationError(f"{case['name']}: the object opens")
+
+
+def build_sealed_vectors():
+    cases = [sealed_case(*spec) for spec in SEALED_CASES]
+    sealed_by_name = {case["name"]: bytes.fromhex(case["sealed_hex"]) for case in cases}
+    negatives = []
+    for name, base, recipient_sk, change, expect in NEGATIVE_SEALED_CASES:
+        negatives.append({"name": name, "base": base, "recipient_sk_hex": recipient_sk.hex(),
+                          "sealed_hex": change(sealed_by_name[base]).hex(), "expect": expect})
+    for name, sealed, expect in _writer_bug_cases():
+        negatives.append({"name": name, "base": None, "recipient_sk_hex": RECIPIENT_A_SK.hex(),
+                          "sealed_hex": sealed.hex(), "expect": expect})
+    for case in negatives:
+        check_negative_case(case)
+    return {
+        "description": "D2VSEAL1 vectors (contract/sealed-format.md). cases: implementations must produce "
+                       "sealed_hex from recipient_pk_hex, eph_sk_hex, nonce_prefix_hex, chunk_size and "
+                       "plaintext_hex, and open it back with recipient_sk_hex; eph_pk_hex, shared_hex, "
+                       "key_id_hex and key_hex are intermediate values for debugging. negative_cases: "
+                       "opening with recipient_sk_hex must fail with expect (truncated, malformed, "
+                       "wrong_key or tampered); base names the case the object was derived from.",
+        "format": "D2VSEAL1",
+        "cases": cases,
+        "negative_cases": negatives,
+    }
+
+
+def annotated_example(case):
+    """Commented hex dump of a one-chunk sealed case, as shown in sealed-format.md."""
+    sealed = bytes.fromhex(case["sealed_hex"])
+    plaintext = bytes.fromhex(case["plaintext_hex"])
+    if len(plaintext) >= case["chunk_size"]:
+        raise ValueError("the example must fit in one chunk")
+    nonce = chunk_nonce(bytes.fromhex(case["nonce_prefix_hex"]), 0)
+    lines = [
+        f"recipient_sk   {case['recipient_sk_hex']}",
+        f"recipient_pk   {case['recipient_pk_hex']}",
+        f"eph_sk         {case['eph_sk_hex']}",
+        f"nonce_prefix   {case['nonce_prefix_hex']}",
+        f"chunk_size     {case['chunk_size']}",
+        f"plaintext      {plaintext.hex()} ({plaintext.decode('ascii')!r})",
+        "",
+        "eph_pk = X25519_base(eph_sk)",
+        f"  {case['eph_pk_hex']}",
+        "shared = X25519(eph_sk, recipient_pk)",
+        f"  {case['shared_hex']}",
+        'key = BLAKE2b-256("D2VSEAL1" || shared || eph_pk || recipient_pk)',
+        f"  {case['key_hex']}",
+        "nonce 0 = nonce_prefix || u64 little-endian 0",
+        f"  {nonce.hex()}",
+        "AD 0 = header (72 bytes) || 01, because chunk 0 is the last chunk",
+        "",
+        f"{'off':<4}  {'bytes':<47}  field",
+    ]
+    rows = (
+        (0, 8, 'magic "D2VSEAL1"'),
+        (8, 16, "key_id = BLAKE2b-256(recipient_pk)[0:8]"),
+        (16, 48, "eph_pk"),
+        (48, 64, "nonce_prefix"),
+        (64, 68, f"chunk_size = {case['chunk_size']}, u32 little-endian"),
+        (68, 72, "reserved, zero"),
+        (72, 72 + len(plaintext),
+         f"chunk 0: ciphertext ({len(plaintext)} byte{'' if len(plaintext) == 1 else 's'})"),
+        (72 + len(plaintext), len(sealed), "chunk 0: Poly1305 tag (16 bytes)"),
+    )
+    for start, end, label in rows:
+        for offset in range(start, end, 16):
+            part = sealed[offset : min(offset + 16, end)].hex(" ")
+            lines.append(f"{offset:04x}  {part:<47}  {label if offset == start else ''}".rstrip())
+    return "\n".join(lines) + "\n"
+
+
+# --------------------------------------------------------------------------
+# Response signature vectors
+# --------------------------------------------------------------------------
+
+SIGNING_SEED_A = label_digest("response-signing-seed-a")
+SIGNING_SEED_B = label_digest("response-signing-seed-b")
+ED25519_ORDER = 2**252 + 27742317777372353535851937790883648493
+
+
+def compact(document):
+    """JSON as a Worker's JSON.stringify writes it: no spaces, non-ASCII kept as is."""
+    return json.dumps(document, separators=(",", ":"), ensure_ascii=False)
+
+
+RESPONSE_BODIES = (
+    ("decision_upload", SIGNING_SEED_A, compact({
+        "v": 1, "report_id": "01J9Z6T4Q8M3K7V2B5N0XWAYCD", "signature": "SZYGIRBIXGHOM3AH",
+        "action": "upload",
+        "upload": {"token": "eyJyIjoiMDFKOVo2VDRROE0zSzdWMkI1TjBYV0FZQ0QiLCJlIjoxNzg5Mjg2MDAwfQ.q8vLbWEt",
+                   "expires_unix": 1789286000,
+                   "artifacts": [{"name": "crash_txt", "max_bytes": 65536},
+                                 {"name": "crash_log", "max_bytes": 65536},
+                                 {"name": "boot_progress", "max_bytes": 335872}]},
+        "retry_after_s": None, "disable_until_unix": None})),
+    ("decision_count_only", SIGNING_SEED_A, compact({
+        "v": 1, "report_id": "01J9Z6T4Q8M3K7V2B5N0XWAYCD", "signature": "SZYGIRBIXGHOM3AH",
+        "action": "count_only", "upload": None, "retry_after_s": None, "disable_until_unix": None})),
+    ("error_rate_limited", SIGNING_SEED_A, compact({
+        "v": 1, "error": "rate_limited", "message": "daily claim limit reached for this installation",
+        "retry_after_s": 32400})),
+    ("error_not_accepting", SIGNING_SEED_A, compact({
+        "v": 1, "error": "not_accepting", "message": "crash reports are paused",
+        "disable_until_unix": 1789372800})),
+    ("artifact_stored", SIGNING_SEED_A, compact({"v": 1, "name": "crash_txt", "bytes": 2210})),
+    ("complete_response", SIGNING_SEED_A, compact({"v": 1, "sample_stored": True})),
+    ("error_non_ascii_message", SIGNING_SEED_B, compact({
+        "v": 1, "error": "invalid_payload", "message": "champ inconnu \xab caf\xe9 \xbb \U0001F525"})),
+    ("empty_body", SIGNING_SEED_B, ""),
+)
+
+
+def _sign(seed, body):
+    return nacl.signing.SigningKey(seed).sign(body.encode("utf-8")).signature
+
+
+def _b64(data):
+    return base64.b64encode(data).decode("ascii")
+
+
+def build_response_signature_vectors():
+    cases, signatures, seeds = [], {}, {}
+    for name, seed, body in RESPONSE_BODIES:
+        signature = _sign(seed, body)
+        signatures[name], seeds[name] = signature, seed
+        cases.append({"name": name, "seed_hex": seed.hex(),
+                      "public_key_hex": nacl.signing.SigningKey(seed).verify_key.encode().hex(),
+                      "body_utf8": body, "signature_b64": _b64(signature)})
+    bodies = {name: body for name, _, body in RESPONSE_BODIES}
+    public_a = nacl.signing.SigningKey(SIGNING_SEED_A).verify_key.encode()
+    public_b = nacl.signing.SigningKey(SIGNING_SEED_B).verify_key.encode()
+    upload = signatures["decision_upload"]
+    s_plus_l = (int.from_bytes(upload[32:], "little") + ED25519_ORDER).to_bytes(32, "little")
+    negatives = [
+        ("body_modified", public_a, bodies["complete_response"].replace("true", "false"),
+         signatures["complete_response"]),
+        ("trailing_newline_added", public_a, bodies["decision_count_only"] + "\n",
+         signatures["decision_count_only"]),
+        ("signature_r_bit_flipped", public_a, bodies["decision_upload"], _flip(upload, 0)),
+        ("signature_s_plus_group_order", public_a, bodies["decision_upload"], upload[:32] + s_plus_l),
+        ("other_public_key", public_b, bodies["decision_upload"], upload),
+    ]
+    negative_cases = []
+    for name, public_key, body, signature in negatives:
+        try:
+            nacl.signing.VerifyKey(public_key).verify(body.encode("utf-8"), signature)
+        except nacl.exceptions.BadSignatureError:
+            negative_cases.append({"name": name, "public_key_hex": public_key.hex(), "body_utf8": body,
+                                   "signature_b64": _b64(signature), "expect": "invalid"})
+            continue
+        raise GenerationError(f"{name}: the signature verifies")
+    return {
+        "description": "Response signature vectors: X-D2V-Signature is the standard base64 (with padding) "
+                       "of the Ed25519 signature (RFC 8032, SHA-512, no prehash, no context) of the exact "
+                       "UTF-8 bytes of the response body. cases must verify and, signed with seed_hex, "
+                       "reproduce signature_b64; negative_cases must not verify.",
+        "algorithm": "Ed25519",
+        "cases": cases,
+        "negative_cases": negative_cases,
+    }
+
+
+# --------------------------------------------------------------------------
 # Command line
 # --------------------------------------------------------------------------
 
@@ -534,6 +804,8 @@ def render_all():
     return {
         "signatures.v1.json": dump(signatures),
         "claims-invalid.v1.json": dump(build_invalid_claim_vectors(signatures)),
+        "sealed.v1.json": dump(build_sealed_vectors()),
+        "response-sig.v1.json": dump(build_response_signature_vectors()),
     }
 
 
