@@ -1,5 +1,6 @@
 // Minimal router. `now` (Unix seconds) is injected so tests control the clock.
 
+import { getSignature, isAdmin, listSignatures, unauthorized } from "./admin";
 import { handleBug, handleBugPreflight } from "./bugs";
 import { handleClaim } from "./claims";
 import type { Env } from "./env";
@@ -21,11 +22,16 @@ interface Route {
 }
 
 const routes: Route[] = [
+  // Console
   { method: "POST", pattern: /^\/v1\/claims$/, handler: handleClaim },
   { method: "PUT", pattern: /^\/v1\/reports\/([^/]+)\/artifacts\/([^/]+)$/, handler: handleUpload },
   { method: "POST", pattern: /^\/v1\/reports\/([^/]+)\/complete$/, handler: handleComplete },
+  // Public site
   { method: "POST", pattern: /^\/v1\/bugs$/, handler: handleBug },
   { method: "OPTIONS", pattern: /^\/v1\/bugs$/, handler: handleBugPreflight },
+  // Admin (authorization checked in handle() before dispatch)
+  { method: "GET", pattern: /^\/v1\/admin\/signatures$/, handler: listSignatures },
+  { method: "GET", pattern: /^\/v1\/admin\/signatures\/([^/]+)$/, handler: getSignature },
 ];
 
 // Responses to the console are signed, errors included, so a hostile network
@@ -54,6 +60,7 @@ export async function handle(request: Request, env: Env, ctx: ExecutionContext, 
   const path = new URL(request.url).pathname;
   let response: Response;
   try {
+    if (path.startsWith("/v1/admin/") && !(await isAdmin(request, env))) return unauthorized();
     response = await dispatch(request, env, ctx, now, path);
   } catch (e) {
     console.error("unhandled error:", e instanceof Error ? e.message : String(e));
