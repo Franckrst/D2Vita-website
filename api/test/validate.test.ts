@@ -183,7 +183,8 @@ describe("validateBug", () => {
     delete noContact.contact;
     expect(validateBug(noContact).ok).toBe(true);
     expect(validateBug(bugBody({ contact: "" })).ok).toBe(true);
-    expect(validateBug(bugBody({ contact: null })).ok).toBe(true);
+    // An absent field and an empty string mean no contact; null is neither.
+    expectInvalid(validateBug(bugBody({ contact: null })), "contact");
   });
 
   it("enforces the length limits, counted in characters", () => {
@@ -196,7 +197,10 @@ describe("validateBug", () => {
   });
 
   it("rejects empty required text, unknown lang, unknown fields and a missing token", () => {
-    expectInvalid(validateBug(bugBody({ title: "   " })), "title");
+    expectInvalid(validateBug(bugBody({ title: "" })), "title");
+    // A blank title is a bad idea but a valid body: the site refuses it, the
+    // contract does not, and the API takes what the contract takes.
+    expect(validateBug(bugBody({ title: "   " })).ok).toBe(true);
     expectInvalid(validateBug(bugBody({ lang: "de" })), "lang");
     expectInvalid(validateBug(bugBody({ admin: true })), "admin");
     const noToken = bugBody();

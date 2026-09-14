@@ -289,7 +289,29 @@ export function validateComplete(input: unknown): Validation<string[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Public bug report (POST /v1/bugs).
+// Public bug report (POST /v1/bugs): contract/schemas/bug.v1.schema.json.
+// A stored bug comes back in every admin.v1#BugItem, so what is accepted here
+// is exactly what those definitions allow. Patterns copied from the schema;
+// test/contract-bugs.test.ts compares the two on a mutation sweep.
+
+const BUG_PATTERNS = {
+  // No control character at all in a single-line field.
+  SingleLine: /^[^\x00-\x1f\x7f]*$/,
+  // Tab, line feed and carriage return are the only ones in the description.
+  MultiLine: /^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$/,
+  // Printable ASCII without spaces.
+  TurnstileToken: /^[!-~]+$/,
+} as const;
+
+// A string of `min` to `max` code points matching `re`.
+function bugText(re: RegExp, min: number, max: number, what: string): Check {
+  return (value, path) => {
+    if (typeof value !== "string") fail(path, "must be a string");
+    const n = charCount(value);
+    if (n < min || n > max) fail(path, `length must be in [${min}, ${max}] characters`);
+    if (!re.test(value)) fail(path, `must be ${what}`);
+  };
+}
 
 export interface BugInput {
   title: string;
@@ -305,12 +327,18 @@ export const BUG_LANGS = ["fr", "en"] as const;
 export function validateBug(input: unknown): Validation<BugInput> {
   return run(() => {
     const b = object(input, "", ["title", "description", "version", "lang", "turnstile_token"], ["contact"]);
-    text(1, 120)(b.title, "title");
-    text(1, 4000)(b.description, "description");
-    text(1, 40)(b.version, "version");
-    if ("contact" in b) nullable(text(0, 120, true))(b.contact, "contact");
+    const single = (min: number, max: number) => bugText(BUG_PATTERNS.SingleLine, min, max, "text without control characters");
+    single(1, 120)(b.title, "title");
+    bugText(BUG_PATTERNS.MultiLine, 1, 4000, "text without control characters other than tab and line breaks")(
+      b.description,
+      "description",
+    );
+    single(1, 40)(b.version, "version");
+    // An absent field and an empty string both mean no contact; null is not
+    // one of the two.
+    if ("contact" in b) single(0, 120)(b.contact, "contact");
     oneOf(BUG_LANGS)(b.lang, "lang");
-    text(1, 2048)(b.turnstile_token, "turnstile_token");
+    bugText(BUG_PATTERNS.TurnstileToken, 1, 2048, "printable ASCII without spaces")(b.turnstile_token, "turnstile_token");
     return input as BugInput;
   });
 }

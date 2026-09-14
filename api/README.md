@@ -200,6 +200,11 @@ the length of the sample lease).
   that small (72-byte header plus one 16-byte tag).
 - A bug report whose `Origin` is not the site is `400 invalid_payload`: the
   contract has no code for a refused origin.
+- A bug body is taken exactly as `bug.v1` describes it: no control character
+  outside tab and line breaks in the description, none at all elsewhere, a
+  Turnstile token of printable ASCII without spaces, `contact` absent or a
+  string (never `null`). A blank title passes here and the site refuses it:
+  what the API stores has to validate as an `admin.v1#BugItem` later.
 - `host_fault` with a PC region `unknown` is not in the rules table; it is
   grouped per build as `hfault_unknown|<build_id>|<pc.offset>|<lr.offset>`.
 - The claim schema accepts an optional top-level `redactions` count. Feature
