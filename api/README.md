@@ -30,6 +30,7 @@ receives bug reports from the public site.
 | `src/admin.ts` | admin routes |
 | `src/notify.ts` | optional Telegram notifications |
 | `src/cron.ts` | retention |
+| `src/maintenance.ts` | D1 statement budget and piece purge shared by the cron and erasure |
 | `migrations/` | D1 schema |
 | `test/` | Vitest suites running inside workerd |
 | `scripts/` | local development helpers |
@@ -60,9 +61,12 @@ is mocked. The suite covers, among others: a new signature gets `upload`, a
 known one `count_only`; **30 simultaneous claims of a new signature produce
 exactly one upload decision** (atomic conditional `UPDATE`; mutation-checked);
 a replay returns the identical signed decision without counting; every cap
-answers 429; unknown build 403; forged, expired or unrequested upload token
-403; missing or oversized `Content-Length` 413; regression reopens a fixed
-signature; merges; CORS; Turnstile; cron retention.
+answers 429, IPv6 counted per prefix; unknown build 403; forged, expired or
+unrequested upload token 403; missing or oversized `Content-Length` 413; an
+interrupted or refused upload charges nothing and its retry is accepted;
+answers bound to their report; regression reopens a fixed signature; merges;
+erasure; CORS; Turnstile; cron retention within the D1 statement budget
+(counted by `test/d1-counter.ts`).
 
 The upload tests that cut a body short, send too much or drop the connection
 ("refuses a body that does not match its Content-Length", "charges nothing for
@@ -119,7 +123,7 @@ Requests carry `X-D2V-Client: d2vita/<build_id>` and `X-D2V-Install: <install_id
 | Method | Path | Answers |
 |---|---|---|
 | POST | `/v1/claims` | `200` decision · `400 invalid_payload` · `403 unknown_build` · `413` · `429 rate_limited` · `503 not_accepting` |
-| PUT | `/v1/reports/{report_id}/artifacts/{name}` | `201 {name, bytes, sha256}` · `400` (body shorter/longer than declared, or cut off) · `403 bad_token` · `409 exists` · `413` · `429` · `500 storage_unavailable` (R2 failed: retry later) |
+| PUT | `/v1/reports/{report_id}/artifacts/{name}` | `201 {report_id, name, bytes, sha256}` · `400` (body shorter/longer than declared, or cut off) · `403 bad_token` · `409 exists` · `413` · `429` · `500 storage_unavailable` (R2 failed: retry later) |
 | POST | `/v1/reports/{report_id}/complete` | `200 {"report_id":…,"sample_stored":bool}` · `400` · `403 bad_token` · `409 incomplete` (`missing`) |
 
 Decision (`action` is `upload` or `count_only`; `upload` is `null` for `count_only`):
@@ -230,13 +234,16 @@ claims off, or move to D1 paid (10 GB).
 
 ### Retention (cron)
 
-Rate counters and IP salts after two days; bugs older than one year; claims
-older than 180 days with their pieces (aggregate counters stay), and the
-per-console links (`signature_installs`: install hash, signature, first seen)
-that no remaining claim refers to — a console that reports the family again
-later is counted again in `installs`; orphan pieces
-(upload window closed, not a stored sample); pieces of signatures `fixed` or
-`ignored` for 90 days — in that order.
+In this order:
+
+1. rate counters and IP salts from two days ago and older;
+2. bugs older than one year;
+3. claims older than 180 days with their pieces (aggregate counters stay), and
+   the per-console links (`signature_installs`: install hash, signature, first
+   seen) that no remaining claim refers to; a console that reports the family
+   again later is counted again in `installs`;
+4. orphan pieces (upload window closed, not a stored sample);
+5. pieces of signatures `fixed` or `ignored` for 90 days.
 
 D1 on the Workers Free plan allows 50 queries per invocation, and the limit
 applies to each statement of a batch. The cron and the erasure route therefore
