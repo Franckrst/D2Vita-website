@@ -171,3 +171,34 @@ describe("the form reads an admin.v1#ErrorBody", () => {
     }
   });
 });
+
+// The privacy page tells the reader what the service keeps. The contract
+// decides part of that: admin.v1#ReportDetail returns `claim`, which has to
+// validate against claim.v1, where install_id is required — so the summary is
+// stored whole, installation ID included. The page has to say so, and keep
+// saying so.
+describe("the privacy page matches what the API stores", () => {
+  const claimSchema = schema("claim");
+
+  it("claim.v1 is why the installation id is kept", () => {
+    expect(claimSchema.required).toContain("install_id");
+    expect(claimSchema.additionalProperties).toBe(false);
+    const reportDetail = adminSchema.$defs.ReportDetail;
+    expect(reportDetail.required).toContain("claim");
+    expect(reportDetail.properties.claim.$ref).toBe("claim.v1.schema.json");
+  });
+
+  it("says in both languages that the summary is kept whole for 180 days", () => {
+    const html = read(siteRoot, "privacy.html");
+    expect(html).toContain('data-i18n="privacy.server.claim"');
+    for (const lang of LANGUAGES) {
+      const text = dicts[lang]["privacy.server.claim"];
+      expect(text, `privacy.server.claim in ${lang}`).toBeTruthy();
+      expect(text).toContain("180");
+      // The retention entry for summaries says the same number.
+      expect(dicts[lang]["privacy.retention.reports.desc"]).toContain("180");
+    }
+    expect(dicts.en["privacy.server.claim"].toLowerCase()).toContain("installation id");
+    expect(dicts.fr["privacy.server.claim"].toLowerCase()).toContain("identifiant d’installation");
+  });
+});

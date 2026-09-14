@@ -67,6 +67,66 @@ describe("GET /v1/admin/reports/{id}", () => {
   });
 });
 
+// A claim is stored whole because admin.v1#ReportDetail returns it and the
+// contract validates it against claim.v1, where install_id is required (see
+// api/README.md and the privacy page). That is one place, deliberately: these
+// tests pin where the raw id may and may not be, and that erasure takes it
+// away. If the maintainer decides the raw id must not be kept, this block is
+// what has to change with src/claims.ts.
+describe("the raw installation id at rest", () => {
+  const TABLES = [
+    "builds",
+    "signatures",
+    "signature_builds",
+    "signature_installs",
+    "reports",
+    "bugs",
+    "rate_counters",
+    "settings",
+  ];
+
+  async function tablesHolding(needle: string): Promise<string[]> {
+    const found: string[] = [];
+    for (const table of TABLES) {
+      const { results } = await env.DB.prepare(`SELECT * FROM ${table}`).all();
+      if (JSON.stringify(results).includes(needle)) found.push(table);
+    }
+    return found;
+  }
+
+  it("is only in the stored claim, and nowhere else in D1 or R2", async () => {
+    const claim = haltClaim();
+    const { decision } = await storeSample(claim);
+    const installId = claim.install_id as string;
+
+    expect(await tablesHolding(installId)).toEqual(["reports"]);
+    // In the reports row it is the claim column alone: the row's own columns
+    // and every counter use install_hash = HMAC(INSTALL_HASH_KEY, install_id).
+    const row = await env.DB.prepare("SELECT * FROM reports WHERE report_id = ?1").bind(decision.report_id).first<any>();
+    expect(JSON.parse(row.claim).install_id).toBe(installId);
+    delete row.claim;
+    expect(JSON.stringify(row)).not.toContain(installId);
+    expect(row.install_hash).toMatch(/^[0-9a-f]{64}$/);
+
+    // Nothing in R2 names it either: keys are signature/report/piece.
+    const objects = await env.ARTIFACTS.list({ include: ["customMetadata"] });
+    expect(objects.objects.length).toBeGreaterThan(0);
+    expect(JSON.stringify(objects.objects)).not.toContain(installId);
+  });
+
+  it("goes away when the installation asks to be forgotten", async () => {
+    const claim = haltClaim();
+    await storeSample(claim);
+    const installId = claim.install_id as string;
+    expect(await tablesHolding(installId)).toEqual(["reports"]);
+
+    const erased = await admin("DELETE", `/v1/admin/installs/${installId}`);
+    expect(erased.status).toBe(200);
+    expect(erased.body).toMatchObject({ v: 1, reports_deleted: 1 });
+    expect(await tablesHolding(installId)).toEqual([]);
+  });
+});
+
 describe("GET /v1/admin/artifacts/{report_id}/{name}", () => {
   it("streams the sealed bytes with their size and hash", async () => {
     const { decision, pieces } = await storeSample(haltClaim());

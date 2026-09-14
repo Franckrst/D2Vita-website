@@ -253,12 +253,22 @@ the length of the sample lease).
   `fixed_in_version` (a regression could never be noticed afterwards), and
   `merged_into` has to name a known signature that is not this one and creates
   no cycle. Both answer 400 `invalid_payload`.
-- The claim is stored as received, `install_id` included, because
-  `admin.v1#ReportDetail` returns it and the contract validates it against
-  `claim.v1`, where `install_id` is required. Everything else uses the
-  pseudonym `install_hash = HMAC(INSTALL_HASH_KEY, install_id)`: counters,
-  distinct-console counts, links and erasure. Claims are deleted after 180
-  days.
+- **The claim is stored as received, `install_id` included** — a deliberate
+  reversal of wave 1, which stripped it. `admin.v1#ReportDetail` returns
+  `claim`, the contract validates that against `claim.v1`, `install_id` is
+  required there and `additionalProperties` is `false`: a stripped claim makes
+  the admin answer invalid, and v1 is frozen. Everything else still uses the
+  pseudonym `install_hash = HMAC(INSTALL_HASH_KEY, install_id)` — counters,
+  distinct-console counts, links, erasure — so the raw id sits in exactly one
+  column (`reports.claim`) and nowhere else, which `test/admin-data.test.ts`
+  pins, R2 included. It goes away with the report: 180 days, or immediately on
+  `DELETE /v1/admin/installs/{install_id}`. The privacy page says this in both
+  languages (`privacy.server.claim`).
+  It is a data-minimisation step backwards and it is **the maintainer's call**,
+  not this track's: keeping it needs nothing, and undoing it is one line in
+  `src/claims.ts` (store `{ install_id: _notStored, ...claim }`) plus a
+  `ClaimStored` definition in a **v2** of the contract whose `install_id` is
+  optional — never an edit to v1.
 - Every report keeps the `rules_version` its signature was computed under
   (`reports.rules_version`, migration `0002`), and `admin.v1#ReportDetail`
   returns that column, not the version the running Worker uses. Design section
