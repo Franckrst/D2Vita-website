@@ -51,7 +51,29 @@ export function secondsUntilNextUtcDay(nowUnix: number): number {
   return 86400 - (nowUnix % 86400);
 }
 
-// `bound` ties a console answer to its request ({report_id, name}).
+// The kill switch answers 503 not_accepting on every console route (claims,
+// pieces and complete). Without an end date set by the admin, the console is
+// told to come back in a day. `bound` ties the answer to its request.
+export const DEFAULT_DISABLE_SECONDS = 86400;
+
+export function notAccepting(settings: Settings, nowUnix: number, bound?: Record<string, unknown>): Response {
+  const until =
+    settings.disable_until_unix !== null && settings.disable_until_unix > nowUnix
+      ? settings.disable_until_unix
+      : nowUnix + DEFAULT_DISABLE_SECONDS;
+  return json(
+    {
+      error: "not_accepting",
+      message: "Crash reports are not accepted right now",
+      disable_until_unix: until,
+      ...bound,
+    },
+    503,
+    { "retry-after": String(until - nowUnix) },
+  );
+}
+
+// `bound` ties a console answer to its request ({report_id, artifact}).
 export function rateLimited(nowUnix: number, bound?: Record<string, unknown>): Response {
   const retry = secondsUntilNextUtcDay(nowUnix);
   return json(

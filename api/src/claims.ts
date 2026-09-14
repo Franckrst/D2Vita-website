@@ -15,10 +15,10 @@ import {
   ipHash,
   loadSettings,
   networkKey,
+  notAccepting,
   rateLimited,
   utcDay,
   type LimitCheck,
-  type Settings,
 } from "./limits";
 import { notify } from "./notify";
 import { RULES_VERSION, canon, signatureId } from "./signature";
@@ -28,7 +28,6 @@ import { validateClaim } from "./validate";
 
 export const CLAIM_MAX_BYTES = 16 * 1024;
 export const LEASE_SECONDS = 1800;
-export const DEFAULT_DISABLE_SECONDS = 86400;
 
 // Pieces requested for each kind (spec section 4.5 "Envoyée pour").
 const WANTED: Record<Kind, readonly ArtifactName[]> = {
@@ -62,18 +61,6 @@ export function compareVersions(a: string, b: string): number {
     if (x !== y) return x < y ? -1 : 1;
   }
   return 0;
-}
-
-function notAccepting(settings: Settings, now: number): Response {
-  const until =
-    settings.disable_until_unix !== null && settings.disable_until_unix > now
-      ? settings.disable_until_unix
-      : now + DEFAULT_DISABLE_SECONDS;
-  return json(
-    { error: "not_accepting", message: "Crash reports are not accepted right now", disable_until_unix: until },
-    503,
-    { "retry-after": String(until - now) },
-  );
 }
 
 function consoleHeaderError(request: Request, claim: Claim): string | null {

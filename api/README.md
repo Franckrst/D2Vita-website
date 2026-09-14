@@ -141,8 +141,11 @@ Requests carry `X-D2V-Client: d2vita/<build_id>` and `X-D2V-Install: <install_id
 | Method | Path | Answers |
 |---|---|---|
 | POST | `/v1/claims` | `200` decision · `400 invalid_payload` · `403 unknown_build` · `413` · `429 rate_limited` · `503 not_accepting` |
-| PUT | `/v1/reports/{report_id}/artifacts/{name}` | `201 {report_id, name, bytes}` and `X-D2V-SHA256` · `400 invalid_payload` (bad path, body shorter/longer than declared or cut off, fewer than 88 bytes) · `403 bad_token` · `409 exists` · `413` · `429` · `500 internal_error` (R2 failed: retry later) |
-| POST | `/v1/reports/{report_id}/complete` | `200 {"report_id":…,"sample_stored":bool}` · `400 invalid_payload` · `403 bad_token` · `409 incomplete` |
+| PUT | `/v1/reports/{report_id}/artifacts/{name}` | `201 {report_id, name, bytes}` and `X-D2V-SHA256` · `400 invalid_payload` (bad path, body shorter/longer than declared or cut off, fewer than 88 bytes) · `403 bad_token` · `409 exists` · `413` · `429` · `500 internal_error` (R2 failed: retry later) · `503 not_accepting` |
+| POST | `/v1/reports/{report_id}/complete` | `200 {"report_id":…,"sample_stored":bool}` · `400 invalid_payload` · `403 bad_token` · `409 incomplete` · `503 not_accepting` |
+
+The kill switch covers the three console routes: with `accepting: false` a
+claim, an upload and a `complete` all answer 503 with `disable_until_unix`.
 
 Decision (`action` is `upload` or `count_only`; `upload` is `null` for `count_only`):
 

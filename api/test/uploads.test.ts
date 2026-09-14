@@ -343,6 +343,32 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
   });
 });
 
+describe("the kill switch on the piece routes", () => {
+  it("answers a signed 503 not_accepting to a PUT and to a complete", async () => {
+    const g = await newUploadDecision();
+    expect((await call(putRequest(g.reportId, "crash_txt", bytesOf(200), g.token))).status).toBe(201);
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO settings (key, value) VALUES ('accepting', 'false')"),
+      env.DB.prepare("INSERT INTO settings (key, value) VALUES ('disable_until_unix', ?1)").bind(String(NOW + 7200)),
+    ]);
+
+    const put = await call(putRequest(g.reportId, "crash_log", bytesOf(200), g.token));
+    expect(put.status).toBe(503);
+    expect(await signedJson(put)).toMatchObject({
+      error: "not_accepting",
+      disable_until_unix: NOW + 7200,
+      report_id: g.reportId,
+      artifact: "crash_log",
+    });
+    expect(await env.ARTIFACTS.head(`artifacts/${g.signature}/${g.reportId}/crash_log.sealed`)).toBeNull();
+
+    const done = await call(completeRequest(g.reportId, g.token, { v: 1, artifacts: ["crash_txt"] }));
+    expect(done.status).toBe(503);
+    expect(await signedJson(done)).toMatchObject({ error: "not_accepting", report_id: g.reportId });
+    expect(await signatureRow(g.signature)).toMatchObject({ sample_state: "leased" });
+  });
+});
+
 describe("POST /v1/reports/{id}/complete", () => {
   async function uploadAll(g: Granted) {
     for (const name of g.names) {

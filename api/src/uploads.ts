@@ -22,6 +22,7 @@ import {
   hasRoom,
   installCaps,
   loadSettings,
+  notAccepting,
   rateLimited,
   utcDay,
   type LimitCheck,
@@ -192,6 +193,10 @@ export async function handleUpload(
     return error("invalid_payload", `A sealed piece is at least ${SEALED_MIN_BYTES} bytes`, bound);
   }
 
+  // The kill switch covers every console route, pieces included.
+  const settings = await loadSettings(env.DB);
+  if (!settings.accepting) return notAccepting(settings, now, bound);
+
   const grant = await authorize(request, env, reportId, now, bound);
   if (grant instanceof Response) return grant;
   const piece = grant.artifacts.find((a) => a.name === name);
@@ -205,7 +210,6 @@ export async function handleUpload(
   if (report.completed_at !== null) return error("exists", "This report is already complete", bound);
   if (recordedPieces(report)[name]) return error("exists", "This piece is already stored", bound);
 
-  const settings = await loadSettings(env.DB);
   const perInstall = installCaps(settings.caps, report.channel);
   const day = utcDay(now);
   const budget: LimitCheck[] = [
@@ -254,6 +258,9 @@ export async function handleComplete(
     return error("invalid_payload", "The path must be /v1/reports/{report_id}/complete");
   }
   const bound = { report_id: reportId };
+  const settings = await loadSettings(env.DB);
+  if (!settings.accepting) return notAccepting(settings, now, bound);
+
   const grant = await authorize(request, env, reportId, now, bound);
   if (grant instanceof Response) return grant;
 
