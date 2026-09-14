@@ -208,7 +208,7 @@ class ClaimSchemaInvalidTest(SchemaTestCase):
                              "/features/runner_state")
 
     def test_host_fault_thread_name_is_printable_ascii(self):
-        for bad in ("main\n", "x" * 33, "café"):
+        for bad in ("main\n", "x" * 33, "caf\xe9"):
             with self.subTest(thread_name=bad):
                 self.assertInvalidAt(
                     self.mutate("host_fault", lambda c: c["features"].update(thread_name=bad)),

@@ -64,28 +64,7 @@
       "type": "array",
       "maxItems": 4,
       "items": { "$ref": "#/$defs/ArtifactOffer" },
-      "allOf": [
-        {
-          "contains": { "required": ["name"], "properties": { "name": { "const": "dump" } } },
-          "minContains": 0,
-          "maxContains": 1
-        },
-        {
-          "contains": { "required": ["name"], "properties": { "name": { "const": "crash_txt" } } },
-          "minContains": 0,
-          "maxContains": 1
-        },
-        {
-          "contains": { "required": ["name"], "properties": { "name": { "const": "crash_log" } } },
-          "minContains": 0,
-          "maxContains": 1
-        },
-        {
-          "contains": { "required": ["name"], "properties": { "name": { "const": "boot_progress" } } },
-          "minContains": 0,
-          "maxContains": 1
-        }
-      ]
+      "$ref": "#/$defs/OneEntryPerArtifactName"
     },
     "redactions": {
       "description": "Number of secret occurrences replaced in the artifacts (section 4.6 of the design). Never the values.",
@@ -208,6 +187,31 @@
       },
       "allOf": [
         { "$ref": "#/$defs/ArtifactSizeCaps" }
+      ]
+    },
+    "OneEntryPerArtifactName": {
+      "description": "An array of {name, ...} objects where each artifact name appears at most once.",
+      "allOf": [
+        {
+          "contains": { "required": ["name"], "properties": { "name": { "const": "dump" } } },
+          "minContains": 0,
+          "maxContains": 1
+        },
+        {
+          "contains": { "required": ["name"], "properties": { "name": { "const": "crash_txt" } } },
+          "minContains": 0,
+          "maxContains": 1
+        },
+        {
+          "contains": { "required": ["name"], "properties": { "name": { "const": "crash_log" } } },
+          "minContains": 0,
+          "maxContains": 1
+        },
+        {
+          "contains": { "required": ["name"], "properties": { "name": { "const": "boot_progress" } } },
+          "minContains": 0,
+          "maxContains": 1
+        }
       ]
     },
     "ArtifactSizeCaps": {
