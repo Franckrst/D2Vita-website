@@ -1,0 +1,10 @@
+{
+  "site.name": "D2Vita",
+  "skip": "Aller au contenu",
+  "nav.label": "Navigation principale",
+  "nav.home": "Accueil",
+  "nav.bug": "Signaler un bug",
+  "nav.privacy": "Vie privée",
+  "lang.toggle": "English",
+  "lang.toggle.aria": "Read this site in English"
+}
