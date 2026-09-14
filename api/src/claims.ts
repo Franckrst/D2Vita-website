@@ -186,7 +186,7 @@ export async function handleClaim(request: Request, env: Env, ctx: ExecutionCont
   }
   if (await consumeAll(env.DB, day, checks)) return rateLimited(now);
 
-  const outcome = await ingest(env, claim, build, install, rawId, rawCanon, target, now);
+  const outcome = await ingest(env, claim, build, install, rawId, rawCanon, target, now, target.head ? null : day);
   if (outcome.newSignature) {
     ctx.waitUntil(notify(env, `D2Vita crash: new signature ${outcome.signature} (${claim.kind}) on ${claim.build_id}\n${rawCanon}`));
   } else if (outcome.regressed) {
@@ -206,6 +206,8 @@ async function ingest(
   rawCanon: string,
   target: { id: string; head: SignatureHead | null },
   now: number,
+  // UTC day whose new-signature budget this request consumed, if any.
+  newSignatureDay: string | null,
 ): Promise<IngestOutcome> {
   const db = env.DB;
   const nonce = toHex(crypto.getRandomValues(new Uint8Array(16)));
@@ -277,6 +279,21 @@ async function ingest(
          RETURNING count`,
       )
       .bind(claim.report_id, nonce, sig, claim.kind, rawCanon, RULES_VERSION, now, claim.build_id),
+  );
+  if (newSignatureDay !== null) {
+    // The signature looked new before the transaction, but a concurrent claim
+    // created it first: give back the new-signature budget taken for it.
+    statements.push(
+      db
+        .prepare(
+          `UPDATE rate_counters SET n = n - 1
+           WHERE scope = ?3 AND subject = '*' AND day = ?4 AND n > 0 AND ${mine}
+             AND EXISTS (SELECT 1 FROM signatures WHERE id = ?5 AND count > 1)`,
+        )
+        .bind(claim.report_id, nonce, SCOPE.globalNewSignatures, newSignatureDay, sig),
+    );
+  }
+  statements.push(
     db
       .prepare(
         `UPDATE signatures SET installs = installs + 1

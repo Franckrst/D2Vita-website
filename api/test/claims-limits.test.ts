@@ -81,6 +81,13 @@ describe("claim rate limits (spec section 5.5)", () => {
     expect(sigs).toEqual({ n: 1, total: 2 });
   });
 
+  it("counts a new signature once in the daily budget even when its first claims arrive together", async () => {
+    const responses = await Promise.all(Array.from({ length: 10 }, () => call(claimRequest(haltClaim()))));
+    expect(responses.map((r) => r.status)).toEqual(Array(10).fill(200));
+    const counter = await env.DB.prepare("SELECT n FROM rate_counters WHERE scope = 'new_signatures:global'").first();
+    expect(counter).toEqual({ n: 1 });
+  }, 30_000);
+
   it("does not consume the IP or global budget once the installation is blocked", async () => {
     const install = installId();
     const ip = "198.51.100.99";
