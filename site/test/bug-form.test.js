@@ -392,9 +392,9 @@ describe("responses", () => {
   const failures = [
     ["400 invalid payload", () => jsonResponse(400, { v: 1, error: "invalid_payload", message: "title" }), "bug.error.invalid"],
     ["403 turnstile", () => jsonResponse(403, { v: 1, error: "turnstile", message: "bad token" }), "bug.error.turnstile"],
-    ["403 other", () => jsonResponse(403, { v: 1, error: "forbidden", message: "no" }), "bug.error.forbidden"],
+    ["403 other", () => jsonResponse(403, { v: 1, error: "bad_token", message: "no" }), "bug.error.forbidden"],
     ["429 without delay", () => jsonResponse(429, { v: 1, error: "rate_limited", message: "slow down" }), "bug.error.rateLimitedLater"],
-    ["500", () => jsonResponse(500, { v: 1, error: "internal", message: "oops" }), "bug.error.server"],
+    ["500", () => jsonResponse(500, { v: 1, error: "internal_error", message: "oops" }), "bug.error.server"],
     ["503", () => jsonResponse(503, { v: 1, error: "not_accepting", message: "off" }), "bug.error.server"],
     ["502 with an HTML body", () => new Response("<html>Bad gateway</html>", { status: 502 }), "bug.error.server"],
   ];
