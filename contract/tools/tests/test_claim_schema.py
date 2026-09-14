@@ -233,6 +233,24 @@ class ClaimSchemaInvalidTest(SchemaTestCase):
         self.assertInvalidAt(too_small, "/artifacts/0/bytes")
         # The cap of each artifact is tested in test_artifact_caps.py.
 
+    def test_dump_is_offered_only_by_a_host_fault_with_a_clean_dump(self):
+        # Design 4.5: the dump is sent for host_fault, and a dump holding a
+        # secret is withheld (redaction: withheld), so it is never offered.
+        clean = claim_of_kind("host_fault")
+        self.assertIn("dump", [artifact["name"] for artifact in clean["artifacts"]])
+        self.assertValid(clean)
+        withheld = claim_of_kind("host_fault")
+        withheld["features"]["redaction"] = "withheld"
+        self.assertInvalidAt(withheld, "/artifacts")
+        withheld["artifacts"] = [artifact for artifact in withheld["artifacts"] if artifact["name"] != "dump"]
+        self.assertValid(withheld)
+        for kind in ("halt", "guest_fault", "abnormal_exit", "hang"):
+            with self.subTest(kind=kind):
+                claim = claim_of_kind(kind)
+                self.assertValid(claim)
+                claim["artifacts"].append({"name": "dump", "bytes": 1048576})
+                self.assertInvalidAt(claim, "/artifacts")
+
     def test_redactions_must_be_non_negative_integer(self):
         self.assertInvalidAt(claim_of_kind("halt", redactions=-1), "/redactions")
         self.assertInvalidAt(claim_of_kind("halt", redactions="3"), "/redactions")

@@ -60,7 +60,7 @@
       "items": { "$ref": "#/$defs/Kind" }
     },
     "artifacts": {
-      "description": "Artifacts the console holds for this report. At most one entry per name.",
+      "description": "Artifacts the console holds for this report. At most one entry per name. Only a host_fault claim whose features.redaction is clean may offer the dump (design section 4.5): other kinds have no dump, and a withheld dump is never offered.",
       "type": "array",
       "maxItems": 4,
       "items": { "$ref": "#/$defs/ArtifactOffer" },
@@ -80,7 +80,8 @@
         "type": "object",
         "properties": {
           "features": { "$ref": "#/$defs/HaltFeatures" },
-          "hints": { "type": "array", "items": { "enum": ["abnormal_exit", "guest_fault", "hang"] } }
+          "hints": { "type": "array", "items": { "enum": ["abnormal_exit", "guest_fault", "hang"] } },
+          "artifacts": { "$ref": "#/$defs/ArtifactsWithoutDump" }
         }
       }
     },
@@ -90,7 +91,8 @@
         "type": "object",
         "properties": {
           "features": { "$ref": "#/$defs/GuestFaultFeatures" },
-          "hints": { "type": "array", "items": { "enum": ["hang"] } }
+          "hints": { "type": "array", "items": { "enum": ["hang"] } },
+          "artifacts": { "$ref": "#/$defs/ArtifactsWithoutDump" }
         }
       }
     },
@@ -101,6 +103,17 @@
         "properties": {
           "features": { "$ref": "#/$defs/HostFaultFeatures" },
           "hints": { "type": "array", "items": { "enum": ["halt", "abnormal_exit", "guest_fault", "hang"] } }
+        },
+        "if": {
+          "type": "object",
+          "required": ["features"],
+          "properties": {
+            "features": { "type": "object", "required": ["redaction"], "properties": { "redaction": { "const": "withheld" } } }
+          }
+        },
+        "then": {
+          "type": "object",
+          "properties": { "artifacts": { "$ref": "#/$defs/ArtifactsWithoutDump" } }
         }
       }
     },
@@ -110,7 +123,8 @@
         "type": "object",
         "properties": {
           "features": { "$ref": "#/$defs/AbnormalExitFeatures" },
-          "hints": { "type": "array", "items": { "enum": ["guest_fault", "hang"] } }
+          "hints": { "type": "array", "items": { "enum": ["guest_fault", "hang"] } },
+          "artifacts": { "$ref": "#/$defs/ArtifactsWithoutDump" }
         }
       }
     },
@@ -120,7 +134,8 @@
         "type": "object",
         "properties": {
           "features": { "$ref": "#/$defs/HangFeatures" },
-          "hints": { "type": "array", "maxItems": 0 }
+          "hints": { "type": "array", "maxItems": 0 },
+          "artifacts": { "$ref": "#/$defs/ArtifactsWithoutDump" }
         }
       }
     }
@@ -222,6 +237,14 @@
           "maxContains": 1
         }
       ]
+    },
+    "ArtifactsWithoutDump": {
+      "description": "An artifact list with no entry named dump.",
+      "type": "array",
+      "not": {
+        "type": "array",
+        "contains": { "type": "object", "required": ["name"], "properties": { "name": { "const": "dump" } } }
+      }
     },
     "ArtifactSizeCaps": {
       "description": "Sealed size caps from section 4.5 of the design: dump 2 MiB, crash_txt 64 KiB, crash_log 64 KiB, boot_progress 320 KiB. Applies to the bytes (claim) or max_bytes (decision) property.",

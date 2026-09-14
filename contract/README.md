@@ -234,6 +234,11 @@ d2-vita) leaves these points open; v1 settles them as follows.
 15. Admin definitions: the design lists tables but no columns, so the fields
     come from sections 5.2 to 5.6. Bugs use the signature statuses `open`,
     `fixed`, `ignored`.
+16. Only a `host_fault` claim whose `features.redaction` is `clean` may offer
+    the `dump`; the schema rejects a dump offered by any other kind or
+    marked `withheld` (section 4.5). The other artifacts are not tied to a
+    kind: the "sent for" column of section 4.5 is applied by the API when it
+    chooses what to request.
 
 ## Monocypher
 

@@ -286,9 +286,9 @@ def _set(pointer, value):
         for key in parents:
             node = node[int(key)] if isinstance(node, list) else node[key]
         if isinstance(node, list):
-            node[int(last)] = value
+            node[int(last)] = copy.deepcopy(value)
         else:
-            node[last] = value
+            node[last] = copy.deepcopy(value)
     return mutate
 
 
@@ -307,7 +307,7 @@ def _append(pointer, value):
         node = document
         for key in pointer.lstrip("/").split("/"):
             node = node[key]
-        node.append(value)
+        node.append(copy.deepcopy(value))
     return mutate
 
 
@@ -397,6 +397,14 @@ INVALID_CLAIM_CASES = [
     ("artifact_boot_progress_over_cap", "spec_example_halt", "/artifacts/2/bytes",
      _set("/artifacts/2/bytes", 320 * KIB + 1)),
     ("redactions_negative", "spec_example_halt", "/redactions", _set("/redactions", -1)),
+    # The dump is offered only by a host_fault whose dump is clean (design section 4.5).
+    ("dump_offered_by_halt", "spec_example_halt", "/artifacts", _append("/artifacts", DUMP_ARTIFACTS[0])),
+    ("dump_offered_by_guest_fault", "guest_fault_worker_four_frames", "/artifacts",
+     _append("/artifacts", DUMP_ARTIFACTS[0])),
+    ("dump_offered_by_abnormal_exit", "abnormal_exit_exit_code", "/artifacts",
+     _append("/artifacts", DUMP_ARTIFACTS[0])),
+    ("dump_offered_by_hang", "hang_with_eip", "/artifacts", _append("/artifacts", DUMP_ARTIFACTS[0])),
+    ("dump_offered_although_withheld", "host_fault_eboot", "/artifacts", _set("/features/redaction", "withheld")),
 ]
 
 

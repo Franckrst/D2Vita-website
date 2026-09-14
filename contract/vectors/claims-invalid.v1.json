@@ -2942,6 +2942,254 @@
         ],
         "redactions": -1
       }
+    },
+    {
+      "name": "dump_offered_by_halt",
+      "base": "spec_example_halt",
+      "invalid_at": "/artifacts",
+      "claim": {
+        "v": 1,
+        "report_id": "01J9Z6T4Q8M3K7V2B5N0XWAYCD",
+        "install_id": "4f3c9a0e8b7d6c5a4f3e2d1c0b9a8f7e",
+        "build_id": "0.1.0+ab12cd34ef56",
+        "channel": "release",
+        "platform": {
+          "model": "vita",
+          "fw": "3.65"
+        },
+        "session": {
+          "started_unix": 1789284000,
+          "uptime_s": 967,
+          "online": false
+        },
+        "kind": "halt",
+        "features": {
+          "code": 1420,
+          "location": null,
+          "frames": [
+            "Game+0x1fedf4",
+            "Game+0x451c23",
+            "Game+0x44f570"
+          ]
+        },
+        "hints": [
+          "guest_fault"
+        ],
+        "artifacts": [
+          {
+            "name": "crash_txt",
+            "bytes": 2210
+          },
+          {
+            "name": "crash_log",
+            "bytes": 3104
+          },
+          {
+            "name": "boot_progress",
+            "bytes": 262144
+          },
+          {
+            "name": "dump",
+            "bytes": 1466440
+          }
+        ]
+      }
+    },
+    {
+      "name": "dump_offered_by_guest_fault",
+      "base": "guest_fault_worker_four_frames",
+      "invalid_at": "/artifacts",
+      "claim": {
+        "v": 1,
+        "report_id": "01M2CT6886T6TG3D9J9Q3CME6B",
+        "install_id": "44d6c592f7960a8fcf0ebd71e01b38da",
+        "build_id": "0.1.0+ab12cd34ef56",
+        "channel": "release",
+        "platform": {
+          "model": "vita",
+          "fw": "3.65"
+        },
+        "session": {
+          "started_unix": 1789305600,
+          "uptime_s": 900,
+          "online": false
+        },
+        "kind": "guest_fault",
+        "features": {
+          "exception": "0xc0000005",
+          "thread": "worker",
+          "eip": "Game+0x2b1c40",
+          "frames": [
+            "Game+0x2b1c40",
+            "Game+0x2b0e18",
+            "Game+0x1d2f00",
+            "Game+0x10a0c4"
+          ]
+        },
+        "hints": [],
+        "artifacts": [
+          {
+            "name": "crash_log",
+            "bytes": 3104
+          },
+          {
+            "name": "boot_progress",
+            "bytes": 278680
+          },
+          {
+            "name": "dump",
+            "bytes": 1466440
+          }
+        ]
+      }
+    },
+    {
+      "name": "dump_offered_by_abnormal_exit",
+      "base": "abnormal_exit_exit_code",
+      "invalid_at": "/artifacts",
+      "claim": {
+        "v": 1,
+        "report_id": "01M2CT688JSMTEVXPVWBW56K7C",
+        "install_id": "1d264fb1ed248290351ee246e9649422",
+        "build_id": "0.1.0+ab12cd34ef56",
+        "channel": "release",
+        "platform": {
+          "model": "vita",
+          "fw": "3.65"
+        },
+        "session": {
+          "started_unix": 1789348800,
+          "uptime_s": 900,
+          "online": false
+        },
+        "kind": "abnormal_exit",
+        "features": {
+          "reason": "exit_process",
+          "code": 3221225477,
+          "import": null,
+          "frames": [
+            "Game+0x1000",
+            "Game+0x2000"
+          ]
+        },
+        "hints": [],
+        "artifacts": [
+          {
+            "name": "crash_txt",
+            "bytes": 1918
+          },
+          {
+            "name": "crash_log",
+            "bytes": 3104
+          },
+          {
+            "name": "boot_progress",
+            "bytes": 278680
+          },
+          {
+            "name": "dump",
+            "bytes": 1466440
+          }
+        ]
+      }
+    },
+    {
+      "name": "dump_offered_by_hang",
+      "base": "hang_with_eip",
+      "invalid_at": "/artifacts",
+      "claim": {
+        "v": 1,
+        "report_id": "01M2CT688N82EC0HRM2K7ED47G",
+        "install_id": "c888b80107f20b713d2d5f7fce622baf",
+        "build_id": "0.1.0+ab12cd34ef56",
+        "channel": "release",
+        "platform": {
+          "model": "vita",
+          "fw": "3.65"
+        },
+        "session": {
+          "started_unix": 1789359600,
+          "uptime_s": null,
+          "online": false
+        },
+        "kind": "hang",
+        "features": {
+          "stalled_beats": 3,
+          "eip": "Game+0x12345",
+          "runner_state": "running"
+        },
+        "hints": [],
+        "artifacts": [
+          {
+            "name": "crash_log",
+            "bytes": 3104
+          },
+          {
+            "name": "boot_progress",
+            "bytes": 278680
+          },
+          {
+            "name": "dump",
+            "bytes": 1466440
+          }
+        ]
+      }
+    },
+    {
+      "name": "dump_offered_although_withheld",
+      "base": "host_fault_eboot",
+      "invalid_at": "/artifacts",
+      "claim": {
+        "v": 1,
+        "report_id": "01M2CT688BJMHN9YV8GZBYT9BB",
+        "install_id": "d8783143055dbcff2c55f105b39bbc18",
+        "build_id": "0.1.0+ab12cd34ef56",
+        "channel": "release",
+        "platform": {
+          "model": "vita",
+          "fw": "3.65"
+        },
+        "session": {
+          "started_unix": 1789323600,
+          "uptime_s": 900,
+          "online": false
+        },
+        "kind": "host_fault",
+        "features": {
+          "stop_reason": "0x30004",
+          "thread_name": "d2cr_upload",
+          "pc": {
+            "region": "eboot",
+            "module": "eboot",
+            "offset": "0x2c4184"
+          },
+          "lr": {
+            "region": "eboot",
+            "module": "eboot",
+            "offset": "0x2c3f10"
+          },
+          "guest_frames": [
+            "Game+0x1fedf4",
+            "Game+0x451c23"
+          ],
+          "redaction": "withheld"
+        },
+        "hints": [],
+        "artifacts": [
+          {
+            "name": "dump",
+            "bytes": 1466440
+          },
+          {
+            "name": "crash_log",
+            "bytes": 3104
+          },
+          {
+            "name": "boot_progress",
+            "bytes": 278680
+          }
+        ]
+      }
     }
   ]
 }

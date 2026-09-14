@@ -72,6 +72,25 @@ class SignatureVectorContentTest(unittest.TestCase):
             gen_vectors.build_signature_vectors(broken)
 
 
+class InvalidClaimVectorContentTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        signatures = gen_vectors.build_signature_vectors()
+        cls.cases = {case["name"]: case for case in gen_vectors.build_invalid_claim_vectors(signatures)["cases"]}
+
+    def assertCase(self, name, invalid_at, kind):
+        self.assertIn(name, sorted(self.cases))
+        self.assertEqual(invalid_at, self.cases[name]["invalid_at"])
+        self.assertEqual(kind, self.cases[name]["claim"]["kind"])
+
+    def test_dump_rules_are_covered(self):
+        for kind in ("halt", "guest_fault", "abnormal_exit", "hang"):
+            with self.subTest(kind=kind):
+                self.assertCase(f"dump_offered_by_{kind}", "/artifacts", kind)
+        self.assertCase("dump_offered_although_withheld", "/artifacts", "host_fault")
+        self.assertEqual("withheld", self.cases["dump_offered_although_withheld"]["claim"]["features"]["redaction"])
+
+
 class VectorCheckerTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
