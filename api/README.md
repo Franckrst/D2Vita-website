@@ -58,10 +58,11 @@ Each test file gets its own D1 database with `migrations/` applied
 generated for every run in `vitest.config.ts` (an Ed25519 key pair for response
 signatures, an admin token, HMAC keys). Outbound `fetch` (Turnstile, Telegram)
 is mocked. Ajv 2020 (a test dependency, never shipped in the Worker) compiles
-the four contract schemas, and `test/helpers.ts` validates **every** answer a
-test receives: the definition of its route for a success,
-`admin.v1#ErrorBody` with the documented status for a failure, plus the
-signature and the binding rules of the console routes. `test/contract-*.test.ts`
+the four contract schemas, and `test/helpers.ts` checks **every** answer a test
+receives: the definition of its route for a success, `admin.v1#ErrorBody` with
+the documented status for a failure, the binding rules of the console routes,
+and, for those routes, the Ed25519 signature verified over the exact bytes the
+way the console verifies it. `test/contract-*.test.ts`
 add the vectors: 26 signature canons and ids, 70 refused claims, 9 response
 signatures and 5 that must not verify, one case per error code and one per
 answer body of the contract.

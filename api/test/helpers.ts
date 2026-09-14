@@ -45,7 +45,23 @@ export async function call(request: Request, now = NOW, bindings: Cloudflare.Env
 export async function expectContractResponse(request: Request, response: Response): Promise<Response> {
   const problems = await contractResponseProblems(request, response);
   expect(problems.map((p) => `${p.where}: ${p.detail}`)).toEqual([]);
+  // Console answers are verified the way the console verifies them: Ed25519
+  // over the exact bytes, under the public key built into the eboot.
+  const path = new URL(request.url).pathname;
+  if (path === "/v1/claims" || path.startsWith("/v1/reports/")) {
+    const bytes = new Uint8Array(await response.clone().arrayBuffer());
+    const signature = response.headers.get("x-d2v-signature");
+    expect(await verifySignature(bytes, signature), `signature of ${request.method} ${path}`).toBe(true);
+  }
   return response;
+}
+
+async function verifySignature(bytes: Uint8Array, signature: string | null): Promise<boolean> {
+  if (signature === null) return false;
+  const key = await crypto.subtle.importKey("raw", fromHex(env.TEST_RESPONSE_PUBLIC_KEY), { name: "Ed25519" }, false, [
+    "verify",
+  ]);
+  return crypto.subtle.verify("Ed25519", key, fromBase64(signature), bytes);
 }
 
 export function randomIp(): string {
