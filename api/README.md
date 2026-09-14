@@ -265,6 +265,13 @@ the length of the sample lease).
 | `global_claims_per_day` / `global_artifact_bytes_per_day` | 2000 / 300 MiB per day |
 | `global_new_signatures_per_day` / `global_bugs_per_day` | 200 / 100 per day |
 
+These are the names of `admin.v1#Caps`. An override lives in `settings` under
+`cap:<name>`; wave 1 used shorter names (`cap:install_claims`,
+`cap:install_claims_dev`, …) and `loadSettings` ignores a `cap:` key it does
+not know, so migration `0003` renames the ten. Applying the migrations to a
+database carried over from wave 1 keeps its overrides; a value already set
+under the new name wins.
+
 D1 rows written per claim, measured with the local simulator: 10 for a known
 signature from a known console, 12 from a new console, 17 for a new signature
 (including the once-a-day IP salt). New signatures are capped at 200 per day,
