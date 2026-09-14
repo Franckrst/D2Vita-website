@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en" class="i18n-pending">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://d2vita-crash.franck-rst-c3d.workers.dev; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title data-i18n="page.bug.title"></title>
+  <meta name="description" data-i18n-attr="content:page.bug.description">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#100e0a">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/fonts/atkinson-hyperlegible-next-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/texturina-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/style.css">
+  <script type="module" src="assets/main.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main" data-i18n="skip"></a>
+
+  <header class="masthead">
+    <a class="wordmark" href="./" data-i18n="site.name"></a>
+    <nav class="masthead__nav" data-i18n-attr="aria-label:nav.label">
+      <ul>
+        <li><a href="./" data-i18n="nav.home"></a></li>
+        <li><a href="bug.html" aria-current="page" data-i18n="nav.bug"></a></li>
+        <li><a href="privacy.html" data-i18n="nav.privacy"></a></li>
+      </ul>
+    </nav>
+    <button type="button" class="lang-toggle" data-lang-toggle data-i18n="lang.toggle" data-i18n-attr="aria-label:lang.toggle.aria"></button>
+  </header>
+
+  <main id="main" class="page page--bug">
+    <header class="page-head">
+      <h1 data-i18n="bug.title"></h1>
+      <p class="lede" data-i18n="bug.intro"></p>
+    </header>
+
+    <div class="page-body">
+      <aside class="rail" aria-labelledby="rail-crash-title">
+        <h2 id="rail-crash-title" class="label" data-i18n="bug.rail.crash.title"></h2>
+        <p data-i18n="bug.rail.crash.body"></p>
+      </aside>
+
+      <div class="page-main">
+        <form id="bug-form" class="report-form" novalidate>
+          <div class="field" data-field="title">
+            <label class="field__label" for="bug-title" data-i18n="bug.field.title.label"></label>
+            <p class="field__hint" id="bug-title-hint" data-i18n="bug.field.title.hint"></p>
+            <input id="bug-title" name="title" type="text" autocomplete="off" required
+              aria-describedby="bug-title-hint bug-title-count bug-title-error">
+            <p class="field__count" id="bug-title-count" data-max="120"></p>
+            <p class="field__error" id="bug-title-error" hidden></p>
+          </div>
+
+          <div class="field" data-field="description">
+            <label class="field__label" for="bug-description" data-i18n="bug.field.description.label"></label>
+            <p class="field__hint" id="bug-description-hint" data-i18n="bug.field.description.hint"></p>
+            <textarea id="bug-description" name="description" rows="9" required
+              aria-describedby="bug-description-hint bug-description-count bug-description-error"></textarea>
+            <p class="field__count" id="bug-description-count" data-max="4000"></p>
+            <p class="field__error" id="bug-description-error" hidden></p>
+          </div>
+
+          <div class="field-pair">
+            <div class="field" data-field="version">
+              <label class="field__label" for="bug-version" data-i18n="bug.field.version.label"></label>
+              <p class="field__hint" id="bug-version-hint" data-i18n="bug.field.version.hint"></p>
+              <input id="bug-version" name="version" type="text" autocomplete="off" spellcheck="false" required
+                aria-describedby="bug-version-hint bug-version-error">
+              <p class="field__error" id="bug-version-error" hidden></p>
+            </div>
+
+            <div class="field" data-field="lang">
+              <label class="field__label" for="bug-lang" data-i18n="bug.field.lang.label"></label>
+              <p class="field__hint" id="bug-lang-hint" data-i18n="bug.field.lang.hint"></p>
+              <select id="bug-lang" name="lang" aria-describedby="bug-lang-hint">
+                <option value="fr" lang="fr" data-i18n="bug.field.lang.fr"></option>
+                <option value="en" lang="en" data-i18n="bug.field.lang.en"></option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field" data-field="contact">
+            <label class="field__label" for="bug-contact">
+              <span data-i18n="bug.field.contact.label"></span>
+              <span class="field__optional" data-i18n="bug.field.optional"></span>
+            </label>
+            <p class="field__hint" id="bug-contact-hint" data-i18n="bug.field.contact.hint"></p>
+            <input id="bug-contact" name="contact" type="text" autocomplete="email" spellcheck="false"
+              aria-describedby="bug-contact-hint bug-contact-error">
+            <p class="field__error" id="bug-contact-error" hidden></p>
+          </div>
+
+          <div class="field" data-field="turnstile">
+            <p class="field__label" id="bug-turnstile-label" data-i18n="bug.turnstile.label"></p>
+            <div id="bug-turnstile" class="turnstile" role="group" tabindex="-1"
+              aria-labelledby="bug-turnstile-label" aria-describedby="bug-turnstile-status bug-turnstile-error"></div>
+            <p class="field__hint" id="bug-turnstile-status"></p>
+            <p class="field__error" id="bug-turnstile-error" hidden></p>
+          </div>
+
+          <div class="report-form__actions">
+            <button type="submit" class="button" id="bug-submit" data-i18n="bug.submit"></button>
+            <p class="report-form__note" data-i18n="bug.note"></p>
+          </div>
+
+          <p class="report-form__progress" id="bug-progress" aria-live="polite"></p>
+          <p class="report-form__alert" id="bug-alert" role="alert" hidden></p>
+        </form>
+
+        <section class="report-sent" id="bug-success" tabindex="-1" aria-labelledby="bug-success-title" hidden>
+          <h2 id="bug-success-title" data-i18n="bug.success.title"></h2>
+          <p data-i18n="bug.success.body"></p>
+          <p class="report-sent__id">
+            <span class="label" data-i18n="bug.success.id"></span>
+            <code id="bug-success-id"></code>
+          </p>
+          <button type="button" class="button button--quiet" id="bug-again" data-i18n="bug.success.again"></button>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="colophon">
+    <ul class="colophon__links">
+      <li><a href="https://github.com/Franckrst/D2Vita/releases" data-i18n="footer.releases"></a></li>
+      <li><a href="https://github.com/Franckrst/D2Vita/issues" data-i18n="footer.issues"></a></li>
+      <li><a href="privacy.html" data-i18n="footer.privacy"></a></li>
+    </ul>
+    <p class="colophon__legal" data-i18n="footer.legal"></p>
+  </footer>
+</body>
+</html>
