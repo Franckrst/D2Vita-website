@@ -38,6 +38,9 @@ export default defineConfig(async () => {
     ],
     test: {
       setupFiles: ["./test/apply-migrations.ts"],
+      // Integration tests go through the local D1/R2 simulators; leave margin
+      // when all files run in parallel.
+      testTimeout: 20_000,
     },
   };
 });

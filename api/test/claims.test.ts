@@ -214,7 +214,9 @@ describe("POST /v1/claims: deduplication (spec section 5.4)", () => {
       { action: "count_only", n: 29 },
       { action: "upload", n: 1 },
     ]);
-  });
+    // ~300 D1 round trips through the local simulator: slow when every test
+    // file runs in parallel, hence the explicit timeout.
+  }, 30_000);
 
   it("hands the lease to the next report once it expired without complete", async () => {
     const first = haltClaim();
