@@ -167,16 +167,17 @@
       "pattern": "^0x(0|[1-9a-f][0-9a-f]{0,7})$"
     },
     "ModuleName": {
+      "description": "Name of a system module exactly as the dump's module list gives it, e.g. SceLibKernel.",
       "type": "string",
       "pattern": "^[A-Za-z0-9_.]{1,32}$"
     },
     "Address": {
-      "description": "<module>+0x<offset>: offset from the module load base, lowercase hex without leading zeros.",
+      "description": "Guest (x86) address <module>+0x<offset>, offset in lowercase hex without leading zeros. module is Game for Game.exe, the lowercase file name without extension for another image mapped by the guest (glide3x, checkrevision), or ABS for an address in no mapped image, whose offset is then the address itself. See Module names in contract/signature-rules.v1.md.",
       "type": "string",
-      "pattern": "^[A-Za-z0-9_.]{1,32}\\+0x(0|[1-9a-f][0-9a-f]{0,7})$"
+      "pattern": "^(Game|ABS|(?!(game|abs)\\+)[a-z0-9_]{1,32})\\+0x(0|[1-9a-f][0-9a-f]{0,7})$"
     },
     "HostAddress": {
-      "description": "Host (ARM) address split by region. offset is relative to the start of the module or region.",
+      "description": "Host (ARM) address split by region. module is the region name for eboot, jit and unknown, and the system module name for sysmodule. offset is relative to the start of the eboot, of the translation cache or of the system module; for unknown it is the address itself.",
       "type": "object",
       "additionalProperties": false,
       "required": ["region", "module", "offset"],
@@ -184,7 +185,21 @@
         "region": { "enum": ["eboot", "jit", "sysmodule", "unknown"] },
         "module": { "$ref": "#/$defs/ModuleName" },
         "offset": { "$ref": "#/$defs/Hex32" }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "type": "object", "required": ["region"], "properties": { "region": { "const": "eboot" } } },
+          "then": { "type": "object", "properties": { "module": { "const": "eboot" } } }
+        },
+        {
+          "if": { "type": "object", "required": ["region"], "properties": { "region": { "const": "jit" } } },
+          "then": { "type": "object", "properties": { "module": { "const": "jit" } } }
+        },
+        {
+          "if": { "type": "object", "required": ["region"], "properties": { "region": { "const": "unknown" } } },
+          "then": { "type": "object", "properties": { "module": { "const": "unknown" } } }
+        }
+      ]
     },
     "SourceLocation": {
       "description": "<file basename>:<line>, e.g. Codec.cpp:1377.",

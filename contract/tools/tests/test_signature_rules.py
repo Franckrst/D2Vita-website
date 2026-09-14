@@ -148,6 +148,21 @@ class RulesDocumentTest(unittest.TestCase):
         self.assertIn('"S" + base32(sha256(utf8(canon)))[0:15]', text)
         self.assertIn(f"rules_version = {check_schemas.RULES_VERSION}", text)
 
+    def test_document_states_the_schema_address_pattern(self):
+        pattern = check_schemas.load_schemas()["claim.v1"]["$defs"]["Address"]["pattern"]
+        self.assertIn(f"`{pattern}`", self.document())
+
+    def test_address_examples_match_the_schema(self):
+        block = re.search(r"<!-- address-examples:begin -->\s*```text\n(.*?)```\s*<!-- address-examples:end -->",
+                          self.document(), re.S)
+        self.assertIsNotNone(block, "address examples block not found")
+        examples = re.findall(r"^(valid|invalid) +(\S+)", block.group(1), re.M)
+        self.assertTrue({"valid", "invalid"} <= {verdict for verdict, _ in examples})
+        for verdict, address in examples:
+            with self.subTest(address=address):
+                errors = check_schemas.schema_errors("claim.v1", address, "Address")
+                self.assertEqual(verdict == "valid", not errors)
+
     def test_worked_example_matches_code(self):
         import base64
         import hashlib

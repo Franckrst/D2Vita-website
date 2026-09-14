@@ -79,17 +79,58 @@ so a missing key cannot happen in a valid claim.
 ## 6. Why `|`, `,` and `-` are unambiguous
 
 The claim schema restricts every string that a template uses: addresses
-(`^[A-Za-z0-9_.]{1,32}\+0x(0|[1-9a-f][0-9a-f]{0,7})$`), 32-bit hex values,
-source locations, module names, import names, reasons and build ids. None
-of them can contain `|` or `,`, and none can be the single character `-`.
-Integers are digits. So `-` always means absent, and `|` and `,` only come
-from the template.
+(`^(Game|ABS|(?!(game|abs)\+)[a-z0-9_]{1,32})\+0x(0|[1-9a-f][0-9a-f]{0,7})$`),
+32-bit hex values, source locations, module names, import names, reasons and
+build ids. None of them can contain `|` or `,`, and none can be the single
+character `-`. Integers are digits. So `-` always means absent, and `|` and
+`,` only come from the template.
 
-Addresses are already normalized by the console (lowercase hex, no leading
-zeros): the schema rejects any other spelling, which is why the API can use
-them as received.
+Addresses are already normalized by the console (one spelling per module,
+lowercase hex, no leading zeros): the schema rejects any other spelling,
+which is why the API can use them as received.
 
-## 7. Notes per kind
+## 7. Module names
+
+An address names its module, so each module needs exactly one spelling:
+two spellings would give one bug two signatures. The console writes guest
+addresses (`frames`, `eip`, `guest_frames`) as `<module>+0x<offset>` with
+these module tokens.
+
+| Module token | Used for | Offset |
+|---|---|---|
+| `Game` | `Game.exe`, Diablo II LoD 1.14d | address minus the load base of `Game.exe` |
+| file name without directory and extension, in lowercase | any other PE image that the guest loader mapped: `glide3x` for `glide3x.dll`, `checkrevision` for `CheckRevision.dll` | address minus the load base of the image |
+| `ABS` | an address in no mapped image (heap, stack, code written at run time), or in an image whose lowercase name is not allowed: longer than 32 characters, a character outside `[a-z0-9_]`, or `game` or `abs` | the address itself |
+
+The schema accepts no other spelling:
+
+<!-- address-examples:begin -->
+```text
+valid    Game+0x1fedf4        Game.exe
+valid    glide3x+0x1a2c       glide3x.dll
+valid    checkrevision+0x0    CheckRevision.dll
+valid    ABS+0x2a4c1000       in no mapped image: the offset is the address
+invalid  Game.exe+0x1fedf4    the extension is dropped
+invalid  game+0x1fedf4        Game.exe is always Game
+invalid  GAME+0x1fedf4        Game.exe is always Game
+invalid  Glide3x+0x1a2c       other images are lowercase
+invalid  glide3x.dll+0x1a2c   the extension is dropped
+invalid  abs+0x2a4c1000       the token is ABS
+invalid  Game+0x01fedf4       no leading zero
+invalid  Game+0x1FEDF4        lowercase hex digits
+```
+<!-- address-examples:end -->
+
+Host addresses (`features.pc` and `features.lr` of `host_fault`) give the
+module in their own `module` field. For the regions `eboot`, `jit` and
+`unknown` it is the region name (the schema requires it). For `sysmodule` it
+is the system module name exactly as the dump's module list gives it, with
+its case, for example `SceLibKernel`; a system module whose name does not
+match `^[A-Za-z0-9_.]{1,32}$` is reported with region `unknown`. The offset
+is relative to the start of the eboot, of the translation cache or of the
+system module; with region `unknown` it is the address itself.
+
+## 8. Notes per kind
 
 - `halt`: `code` is the Halt code; `location` is `File.cpp:line` or `null`;
   the first 3 guest frames, innermost first, reporter frames already removed
@@ -110,7 +151,7 @@ them as received.
   decimal, otherwise `-`; then the first frame.
 - `hang`: the guest `eip` only (`-` when unknown).
 
-## 8. What a signature ignores
+## 9. What a signature ignores
 
 `report_id`, `install_id`, `channel`, `platform`, `session`, `hints`,
 `artifacts`, `redactions`, and every feature a template does not name (for
@@ -118,7 +159,7 @@ example `thread`, `thread_name`, `redaction`, `stalled_beats`,
 `runner_state`). Manual merges (`merged_into`) are applied by the API after
 the signature is computed.
 
-## 9. Worked example
+## 10. Worked example
 
 The claim of design section 4.4 (`vectors/signatures.v1.json`, case
 `spec_example_halt`):
@@ -132,7 +173,7 @@ signature = SZYGIRBIXGHOM3AH
 ```
 <!-- example:end -->
 
-## 10. Changing the rules
+## 11. Changing the rules
 
 Changing a template, the formatting or the id formula changes the signature
 of existing reports. That is a new `rules_version` described by a new

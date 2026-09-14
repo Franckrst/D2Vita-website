@@ -250,6 +250,12 @@ SIGNATURE_CASES = [
            [{"name": "dump", "bytes": 2 * MIB}, {"name": "crash_txt", "bytes": 64 * KIB},
             {"name": "crash_log", "bytes": 64 * KIB}, {"name": "boot_progress", "bytes": 320 * KIB}]),
      "hfault_jit|0x30004|Game+0x2b1c40"),
+    # Guest addresses outside Game.exe: another image (lowercase name) and no image (ABS).
+    ("guest_fault_outside_game_exe",
+     claim(25, "guest_fault", {"exception": "0xc0000005", "thread": "worker", "eip": "ABS+0x2a4c1000",
+                               "frames": ["glide3x+0x1a2c", "Game+0x2b1c40", "checkrevision+0x1f00"]},
+           LOG_ARTIFACTS),
+     "gfault|0xc0000005|ABS+0x2a4c1000|glide3x+0x1a2c,Game+0x2b1c40"),
 ]
 
 
@@ -352,8 +358,19 @@ INVALID_CLAIM_CASES = [
     ("address_trailing_newline", "spec_example_halt", "/features/frames/0",
      _set("/features/frames/0", "Game+0x1fedf4\n")),
     ("address_module_33_characters", "spec_example_halt", "/features/frames/0",
-     _set("/features/frames/0", "M" * 33 + "+0x1")),
+     _set("/features/frames/0", "m" * 33 + "+0x1")),
     ("address_with_pipe", "spec_example_halt", "/features/frames/0", _set("/features/frames/0", "Ga|me+0x1")),
+    # One spelling per module (signature-rules.v1.md, module names).
+    ("address_module_with_extension", "spec_example_halt", "/features/frames/0",
+     _set("/features/frames/0", "Game.exe+0x1fedf4")),
+    ("address_module_game_lowercase", "spec_example_halt", "/features/frames/0",
+     _set("/features/frames/0", "game+0x1fedf4")),
+    ("address_module_other_image_not_lowercase", "spec_example_halt", "/features/frames/0",
+     _set("/features/frames/0", "Glide3x+0x1a2c")),
+    ("address_outside_images_token_lowercase", "spec_example_halt", "/features/frames/0",
+     _set("/features/frames/0", "abs+0x2a4c1000")),
+    ("host_pc_module_is_not_its_region", "host_fault_eboot", "/features/pc/module",
+     _set("/features/pc/module", "eboot.bin")),
     ("frames_17", "halt_sixteen_frames", "/features/frames", _append("/features/frames", "Game+0x1")),
     ("guest_frames_9", "host_fault_jit", "/features/guest_frames",
      _set("/features/guest_frames", frames(*range(1, 10)))),

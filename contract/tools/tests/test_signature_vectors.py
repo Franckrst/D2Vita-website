@@ -54,6 +54,14 @@ class SignatureVectorContentTest(unittest.TestCase):
         self.assertTrue(any(f["import"] is None and f["code"] == 0 for f in exits))
         self.assertTrue(any(f["eip"] is None for f in features("hang")))
         self.assertTrue(any(f["stop_reason"] is None for f in features("host_fault")))
+        guest_addresses = [address for case in self.cases for key in ("frames", "guest_frames", "eip")
+                           for address in ([case["claim"]["features"].get(key)] if key == "eip"
+                                           else case["claim"]["features"].get(key, []))
+                           if address]
+        modules = {address.split("+")[0] for address in guest_addresses}
+        self.assertIn("Game", modules)
+        self.assertIn("ABS", modules)  # an address in no mapped image
+        self.assertTrue(modules - {"Game", "ABS"})  # another image, lowercase
 
     def test_build_dependence_pairs(self):
         by_name = {case["name"]: case for case in self.cases}
@@ -89,6 +97,16 @@ class InvalidClaimVectorContentTest(unittest.TestCase):
                 self.assertCase(f"dump_offered_by_{kind}", "/artifacts", kind)
         self.assertCase("dump_offered_although_withheld", "/artifacts", "host_fault")
         self.assertEqual("withheld", self.cases["dump_offered_although_withheld"]["claim"]["features"]["redaction"])
+
+    def test_module_spellings_are_covered(self):
+        for name, address in (("address_module_with_extension", "Game.exe+0x1fedf4"),
+                              ("address_module_game_lowercase", "game+0x1fedf4"),
+                              ("address_module_other_image_not_lowercase", "Glide3x+0x1a2c"),
+                              ("address_outside_images_token_lowercase", "abs+0x2a4c1000")):
+            with self.subTest(case=name):
+                self.assertCase(name, "/features/frames/0", "halt")
+                self.assertEqual(address, self.cases[name]["claim"]["features"]["frames"][0])
+        self.assertCase("host_pc_module_is_not_its_region", "/features/pc/module", "host_fault")
 
 
 class VectorCheckerTest(unittest.TestCase):

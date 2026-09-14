@@ -1206,6 +1206,49 @@
       },
       "canon": "hfault_jit|0x30004|Game+0x2b1c40",
       "signature": "SYCOS52VJ7XGYI4G"
+    },
+    {
+      "name": "guest_fault_outside_game_exe",
+      "claim": {
+        "v": 1,
+        "report_id": "01M2CT688SSGZWGGPP31PGF9X7",
+        "install_id": "4822b05bf690d48c6db4fbfcfb6f8186",
+        "build_id": "0.1.0+ab12cd34ef56",
+        "channel": "release",
+        "platform": {
+          "model": "vita",
+          "fw": "3.65"
+        },
+        "session": {
+          "started_unix": 1789374000,
+          "uptime_s": 900,
+          "online": false
+        },
+        "kind": "guest_fault",
+        "features": {
+          "exception": "0xc0000005",
+          "thread": "worker",
+          "eip": "ABS+0x2a4c1000",
+          "frames": [
+            "glide3x+0x1a2c",
+            "Game+0x2b1c40",
+            "checkrevision+0x1f00"
+          ]
+        },
+        "hints": [],
+        "artifacts": [
+          {
+            "name": "crash_log",
+            "bytes": 3104
+          },
+          {
+            "name": "boot_progress",
+            "bytes": 278680
+          }
+        ]
+      },
+      "canon": "gfault|0xc0000005|ABS+0x2a4c1000|glide3x+0x1a2c,Game+0x2b1c40",
+      "signature": "SKKUH77HBSACAMRV"
     }
   ]
 }

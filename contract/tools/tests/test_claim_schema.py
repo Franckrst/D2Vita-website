@@ -50,7 +50,20 @@ class ClaimSchemaValidTest(SchemaTestCase):
 
     def test_address_edge_forms(self):
         claim = claim_of_kind("halt")
-        claim["features"]["frames"] = ["Game+0x0", "kernel32.dll+0xffffffff", "A" * 32 + "+0x1"]
+        claim["features"]["frames"] = ["Game+0x0", "glide3x+0xffffffff", "checkrevision+0x10", "ABS+0x7ffd1234",
+                                       "a" * 32 + "+0x1", "gamex+0x1", "d2_0+0x2"]
+        self.assertValid(claim)
+
+    def test_host_address_module_follows_region(self):
+        claim = claim_of_kind("host_fault")
+        for region in ("eboot", "jit", "unknown"):
+            with self.subTest(region=region):
+                claim["features"]["pc"] = {"region": region, "module": region, "offset": "0x10"}
+                self.assertValid(claim)
+                for module in ("eboot.bin", region.upper(), "SceLibKernel"):
+                    claim["features"]["pc"] = {"region": region, "module": module, "offset": "0x10"}
+                    self.assertInvalidAt(claim, "/features/pc/module")
+        claim["features"]["pc"] = {"region": "sysmodule", "module": "SceLibKernel", "offset": "0x1f2c"}
         self.assertValid(claim)
 
     def test_integral_float_literal_is_an_integer(self):
@@ -149,7 +162,10 @@ class ClaimSchemaInvalidTest(SchemaTestCase):
 
     def test_addresses_are_normalized(self):
         for bad in ("Game+0x1FEDF4", "Game+0x01fedf4", "Game+1fedf4", "Game+0x", "Game+0x123456789",
-                    "Ga me+0x1", "Game+0x1fedf4\n", "A" * 33 + "+0x1", "+0x1", "Game|x+0x1"):
+                    "Ga me+0x1", "Game+0x1fedf4\n", "a" * 33 + "+0x1", "+0x1", "Game|x+0x1",
+                    # one spelling per module (signature-rules.v1.md, module names)
+                    "Game.exe+0x1fedf4", "game+0x1fedf4", "GAME+0x1fedf4", "Glide3x+0x1a2c",
+                    "glide3x.dll+0x1a2c", "abs+0x2a4c1000", "Abs+0x2a4c1000", "kernel32-x+0x1"):
             with self.subTest(address=bad):
                 claim = claim_of_kind("halt")
                 claim["features"]["frames"][0] = bad

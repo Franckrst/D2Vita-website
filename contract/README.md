@@ -238,6 +238,11 @@ d2-vita) leaves these points open; v1 settles them as follows.
    table: `hfault_unknown|{build_id}|{features.pc.offset}|{features.lr.offset}`.
 3. Addresses and hex values are normalized (lowercase, no leading zeros); the
    schema rejects other spellings, so the API can use them as received.
+   Module tokens have one spelling each (`signature-rules.v1.md`, module
+   names): `Game` for `Game.exe`, the lowercase file name without extension
+   for another guest image, `ABS` with the address itself for an address in
+   no image. A host address's `module` is the region name for `eboot`, `jit`
+   and `unknown`; with region `unknown` the offset is the address itself.
 4. Every `features` key is required; `null` means unknown (`location`,
    `exception`, `stop_reason`, `thread_name`, `code` and `import` of
    `abnormal_exit`, `eip` and `runner_state` of `hang`, `uptime_s`).
