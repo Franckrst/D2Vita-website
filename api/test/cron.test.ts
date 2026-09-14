@@ -45,6 +45,7 @@ async function insertReport(o: {
   sample_stored?: number | null;
   completed_at?: number | null;
   upload_expires?: number | null;
+  install_hash?: string;
 }): Promise<string> {
   const reportId = ulid();
   const artifacts: Record<string, unknown> = {};
@@ -55,7 +56,7 @@ async function insertReport(o: {
   await env.DB.prepare(
     `INSERT INTO reports (report_id, ingest_nonce, signature, raw_signature, install_hash, build_id, channel, kind,
                           received_at, claim, decision, action, requested, upload_expires, artifacts, completed_at, sample_stored)
-     VALUES (?1, 'n', ?2, ?2, 'h', '0.1.0+ab12cd34ef56', 'release', 'hang', ?3, '{}', '{}', ?4, NULL, ?5, ?6, ?7, ?8)`,
+     VALUES (?1, 'n', ?2, ?2, ?9, '0.1.0+ab12cd34ef56', 'release', 'hang', ?3, '{}', '{}', ?4, NULL, ?5, ?6, ?7, ?8)`,
   )
     .bind(
       reportId,
@@ -66,6 +67,7 @@ async function insertReport(o: {
       JSON.stringify(artifacts),
       o.completed_at ?? null,
       o.sample_stored ?? null,
+      o.install_hash ?? "h",
     )
     .run();
   return reportId;
@@ -170,6 +172,26 @@ describe("runCron retention (spec section 5.6)", () => {
     expect(await objectCount()).toBe(0);
     expect(await signatureRow(open)).toMatchObject({ count: 9, sample_state: "none", sample_report: null });
     expect(await signatureRow(closed)).toMatchObject({ count: 4, sample_state: "stored", sample_purged_at: T });
+  });
+
+  it("forgets which consoles reported a family once none of their claims remains, keeping the distinct count", async () => {
+    const sig = await insertSignature({ status: "open", count: 4 });
+    await env.DB.prepare("UPDATE signatures SET installs = 3 WHERE id = ?1").bind(sig).run();
+    const [gone, back, fresh] = ["a", "b", "c"].map((c) => c.repeat(64)) as [string, string, string];
+    // gone: one old claim only; back: an old claim and a recent one; fresh: a recent claim.
+    await insertReport({ signature: sig, received_at: T - 200 * DAY, install_hash: gone });
+    await insertReport({ signature: sig, received_at: T - 200 * DAY, install_hash: back });
+    await insertReport({ signature: sig, received_at: T - 5 * DAY, install_hash: back });
+    await insertReport({ signature: sig, received_at: T - 5 * DAY, install_hash: fresh });
+    const link = (hash: string, firstSeen: number) =>
+      env.DB.prepare("INSERT INTO signature_installs (signature, install_hash, first_seen) VALUES (?1, ?2, ?3)").bind(sig, hash, firstSeen);
+    await env.DB.batch([link(gone, T - 200 * DAY), link(back, T - 200 * DAY), link(fresh, T - 5 * DAY)]);
+
+    const summary = await runCron(env, T);
+    expect(summary).toMatchObject({ complete: true, old_reports: 2, install_links: 1 });
+    const links = await env.DB.prepare("SELECT install_hash FROM signature_installs ORDER BY install_hash").all();
+    expect(links.results).toEqual([{ install_hash: back }, { install_hash: fresh }]);
+    expect(await signatureRow(sig)).toMatchObject({ count: 4, installs: 3 });
   });
 
   it("deletes bugs older than one year", async () => {

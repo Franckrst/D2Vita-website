@@ -7,7 +7,8 @@
 //  1. rate counters and IP salts from two days ago and older;
 //  2. bugs older than one year;
 //  3. claims older than 180 days: their pieces first, then the rows once no
-//     old claim has pieces left (aggregate counters stay);
+//     old claim has pieces left, and the (signature, install_hash) links no
+//     remaining claim refers to (aggregate counters, installs included, stay);
 //  4. orphan pieces: upload window closed and not a stored sample;
 //  5. pieces of signatures fixed or ignored for 90 days, then the signatures
 //     are marked purged.
@@ -32,6 +33,7 @@ export interface CronSummary {
   bugs: number;
   old_reports: number;
   old_report_artifacts: number;
+  install_links: number;
   orphan_artifacts: number;
   closed_signatures: number;
   closed_artifacts: number;
@@ -46,6 +48,7 @@ export async function runCron(env: Env, now: number, budget = new StatementBudge
     bugs: 0,
     old_reports: 0,
     old_report_artifacts: 0,
+    install_links: 0,
     orphan_artifacts: 0,
     closed_signatures: 0,
     closed_artifacts: 0,
@@ -71,9 +74,9 @@ export async function runCron(env: Env, now: number, budget = new StatementBudge
   const reportCutoff = now - RETENTION.reportDays * DAY;
   const oldPieces = await purgePieces(env, budget, "received_at <= ?1", [reportCutoff]);
   summary.old_report_artifacts = oldPieces.deleted;
-  if (!oldPieces.done || !budget.take(4)) return summary;
+  if (!oldPieces.done || !budget.take(5)) return summary;
   const oldClaims = "SELECT report_id FROM reports WHERE received_at <= ?1 AND artifacts = '{}'";
-  const [, , , deleted] = await db.batch([
+  const [, , , links, deleted] = await db.batch([
     // Open families ask for a fresh sample next time; closed ones keep their
     // state and are marked purged.
     db
@@ -95,8 +98,21 @@ export async function runCron(env: Env, now: number, budget = new StatementBudge
          WHERE sample_state = 'leased' AND lease_report IN (${oldClaims})`,
       )
       .bind(reportCutoff),
+    // Pseudonymous per-console links are kept only as long as a claim of that
+    // console for that family is. A console seen again later is counted again
+    // in `installs`, like any console new to the family.
+    db
+      .prepare(
+        `DELETE FROM signature_installs
+         WHERE (signature, install_hash) IN (SELECT signature, install_hash FROM reports WHERE received_at <= ?1 AND artifacts = '{}')
+           AND NOT EXISTS (SELECT 1 FROM reports r
+                           WHERE r.install_hash = signature_installs.install_hash AND r.signature = signature_installs.signature
+                             AND r.received_at > ?1)`,
+      )
+      .bind(reportCutoff),
     db.prepare("DELETE FROM reports WHERE received_at <= ?1 AND artifacts = '{}'").bind(reportCutoff),
   ]);
+  summary.install_links = links?.meta.changes ?? 0;
   summary.old_reports = deleted?.meta.changes ?? 0;
 
   // 4. Orphans: nobody can upload or complete after the window, and the

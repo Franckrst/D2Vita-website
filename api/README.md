@@ -211,7 +211,10 @@ so the daily worst case stays near 25 000 writes (free quota: 100 000).
 ### Retention (cron)
 
 Rate counters and IP salts after two days; bugs older than one year; claims
-older than 180 days with their pieces (aggregate counters stay); orphan pieces
+older than 180 days with their pieces (aggregate counters stay), and the
+per-console links (`signature_installs`: install hash, signature, first seen)
+that no remaining claim refers to — a console that reports the family again
+later is counted again in `installs`; orphan pieces
 (upload window closed, not a stored sample); pieces of signatures `fixed` or
 `ignored` for 90 days — in that order.
 
@@ -220,8 +223,8 @@ applies to each statement of a batch. The cron and the erasure route therefore
 spend at most 40 statements (`src/maintenance.ts`), work set-based where they
 can, and stop cleanly when the budget runs out: rows are only deleted once
 their pieces are gone, and the next run (the next day for the cron, the next
-call for erasure) continues. An idle cron run executes 11 statements and needs
-14 of its budget (a piece-purge round reserves two before it knows whether
+call for erasure) continues. An idle cron run executes 12 statements and needs
+15 of its budget (a piece-purge round reserves two before it knows whether
 anything is left); each round of up to 50 reports whose pieces it deletes adds
 two. The summary it logs says `complete`.
 
