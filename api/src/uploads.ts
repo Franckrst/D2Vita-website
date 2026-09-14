@@ -3,9 +3,9 @@
 //
 // Bodies are streamed straight into R2 (never buffered): the size is checked
 // from Content-Length before anything is read, and a FixedLengthStream makes
-// R2 refuse a body that does not match it. The SHA-256 is computed on a tee of
-// the same stream. R2 custom metadata has to be given when the put starts, so
-// the hash is recorded in D1 (reports.artifacts) instead of R2 metadata.
+// R2 refuse a body that does not match it. The SHA-256 is computed by a tap
+// on the same stream. R2 custom metadata has to be given when the put starts,
+// so the hash is recorded in D1 (reports.artifacts) instead of R2 metadata.
 
 import { toHex } from "./crypto";
 import { requireSecret, type Env } from "./env";

@@ -222,19 +222,22 @@ export async function patchSignature(
 
   const db = env.DB;
   const row = SIGNATURE_ID.test(id)
-    ? await db.prepare("SELECT id, fixed_in_version FROM signatures WHERE id = ?1").bind(id).first<Row>()
+    ? await db.prepare("SELECT id, status, fixed_in_version FROM signatures WHERE id = ?1").bind(id).first<Row>()
     : null;
   if (!row) return error(404, "not_found", "No such signature");
+
+  // A fixed signature needs its version, or regressions could never be detected.
+  const status = patch.status ?? row.status;
+  const version = patch.fixed_in_version !== undefined ? patch.fixed_in_version : row.fixed_in_version;
+  if (status === "fixed" && !version) {
+    return error(400, "invalid_payload", "fixed_in_version: required while status is fixed");
+  }
 
   const sets: string[] = [];
   const binds: unknown[] = [];
   const set = (column: string, value: unknown) => sets.push(`${column} = ?${binds.push(value)}`);
 
   if (patch.status !== undefined) {
-    const version = patch.fixed_in_version !== undefined ? patch.fixed_in_version : row.fixed_in_version;
-    if (patch.status === "fixed" && !version) {
-      return error(400, "invalid_payload", "fixed_in_version: required when status is fixed");
-    }
     set("status", patch.status);
     set("status_changed_at", now);
   }

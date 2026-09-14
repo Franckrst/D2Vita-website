@@ -44,6 +44,14 @@ describe("PATCH /v1/admin/signatures/{id}", () => {
     expect((await patch(a, { status: "ignored" })).body.signature).toMatchObject({ status: "ignored", fixed_in_version: "0.3.0" });
   });
 
+  it("refuses clearing fixed_in_version while the signature stays fixed", async () => {
+    await patch(a, { status: "fixed", fixed_in_version: "0.2.0" });
+    const res = await patch(a, { fixed_in_version: null });
+    expect(res.status).toBe(400);
+    expect(await signatureRow(a)).toMatchObject({ status: "fixed", fixed_in_version: "0.2.0" });
+    expect((await patch(a, { status: "open", fixed_in_version: null })).status).toBe(200);
+  });
+
   it("refuses status regressed, which only the server sets", async () => {
     expect((await patch(a, { status: "regressed" })).status).toBe(400);
   });
