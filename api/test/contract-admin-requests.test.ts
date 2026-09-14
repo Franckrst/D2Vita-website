@@ -5,7 +5,9 @@
 // src/validate.ts and Ajv on the contract schema have to agree on every mutant.
 // Admin *answers* are validated on the way out of every test (test/helpers.ts);
 // this file is the other half, the bodies the admin tool sends.
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { ADMIN_PATTERNS } from "../src/admin";
 import { CAP_NAMES } from "../src/limits";
 import {
   validateBugPatch,
@@ -14,9 +16,55 @@ import {
   validateSignaturePatch,
   type Validation,
 } from "../src/validate";
-import { matchesContract } from "./contract";
-import { BUILD_ID } from "./fixtures";
+import { admin, adminRequest } from "./admin-helpers";
+import { SCHEMAS, matchesContract } from "./contract";
+import { countStatements } from "./d1-counter";
+import { BUILD_ID, ulid } from "./fixtures";
+import { call } from "./helpers";
 import { mutants } from "./mutate";
+
+// ---------------------------------------------------------------------------
+// Path parameters: the ids the admin routes look up are the contract's ids.
+
+const claimDefs = (SCHEMAS["claim.v1"] as unknown as { $defs: Record<string, { pattern: string }> }).$defs;
+const decisionDefs = (SCHEMAS["decision.v1"] as unknown as { $defs: Record<string, { pattern: string }> }).$defs;
+const bugDefs = (SCHEMAS["bug.v1"] as unknown as { $defs: Record<string, { pattern: string }> }).$defs;
+
+describe("admin path parameters", () => {
+  it.each([
+    ["ReportId", claimDefs.ReportId!.pattern],
+    ["InstallId", claimDefs.InstallId!.pattern],
+    ["BuildId", claimDefs.BuildId!.pattern],
+    ["SignatureId", decisionDefs.SignatureId!.pattern],
+  ])("%s is the pattern of the contract", (name, pattern) => {
+    expect(ADMIN_PATTERNS[name as keyof typeof ADMIN_PATTERNS].source).toBe(pattern);
+  });
+
+  it("only accepts bug ids the contract accepts", () => {
+    const contract = new RegExp(bugDefs.BugId!.pattern);
+    // The API's own ids are narrower (base32 of 10 random bytes); every id it
+    // would look up still has to be one bug.v1 calls well formed.
+    for (const id of ["B" + "A".repeat(16), "B" + "7".repeat(16), "BABCDEFGHIJKLMNO"]) {
+      expect(ADMIN_PATTERNS.BugId.test(id) && !contract.test(id), id).toBe(false);
+    }
+    expect(ADMIN_PATTERNS.BugId.test("B" + "0".repeat(16))).toBe(false); // 0 and 1 are not in the alphabet
+  });
+
+  it("does not look up a report id the contract calls malformed", async () => {
+    // 26 Crockford characters, but the first is not 0-7: claim.v1#ReportId
+    // refuses it, so the admin route must answer without touching D1.
+    const malformed = "8" + ulid().slice(1);
+    const counted = countStatements(env.DB);
+    const response = await call(adminRequest("GET", `/v1/admin/reports/${malformed}`), undefined, {
+      ...env,
+      DB: counted.db,
+    });
+    expect(response.status).toBe(404);
+    expect(counted.statements()).toBe(0);
+    // A well-formed id is looked up (and answers 404 because it is unknown).
+    expect((await admin("GET", `/v1/admin/reports/${ulid()}`)).status).toBe(404);
+  });
+});
 
 type Validator = (input: unknown) => Validation<unknown>;
 

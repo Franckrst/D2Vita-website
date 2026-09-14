@@ -10,7 +10,13 @@ import { StatementBudget, purgePieces } from "./maintenance";
 import { RULES_VERSION } from "./signature";
 import { ARTIFACT_NAMES, KINDS, type ArtifactName } from "./types";
 import { artifactKey } from "./uploads";
-import { validateBugPatch, validateBuildRegistration, validateSettingsPatch, validateSignaturePatch } from "./validate";
+import {
+  CLAIM_PATTERNS,
+  validateBugPatch,
+  validateBuildRegistration,
+  validateSettingsPatch,
+  validateSignaturePatch,
+} from "./validate";
 
 const ADMIN_BODY_MAX_BYTES = 16 * 1024;
 
@@ -30,10 +36,20 @@ export function unauthorized(): Response {
 // ---------------------------------------------------------------------------
 // Query helpers.
 
-const SIGNATURE_ID = /^S[A-Z2-7]{15}$/;
-const BUILD_ID = /^[0-9]+\.[0-9]+\.[0-9]+\+[0-9a-f]{12}(-dirty)?$/;
-const REPORT_ID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
-const BUG_ID = /^B[A-Z2-7]{16}$/;
+// Path parameters and query ids are matched with the patterns of the contract,
+// never a looser spelling of them: an id claim.v1 or decision.v1 calls
+// malformed is answered without a lookup. BugId is the narrower alphabet of the
+// ids this API mints (base32 of 10 random bytes), a subset of bug.v1#BugId.
+// test/contract-admin-requests.test.ts holds all five against the schemas.
+export const ADMIN_PATTERNS = {
+  SignatureId: /^S[A-Z2-7]{15}$/,
+  BuildId: CLAIM_PATTERNS.BuildId,
+  ReportId: CLAIM_PATTERNS.ReportId,
+  InstallId: CLAIM_PATTERNS.InstallId,
+  BugId: /^B[A-Z2-7]{16}$/,
+} as const;
+
+const { SignatureId: SIGNATURE_ID, BuildId: BUILD_ID, ReportId: REPORT_ID, BugId: BUG_ID } = ADMIN_PATTERNS;
 
 class BadQuery extends Error {}
 
@@ -450,7 +466,6 @@ export async function postBuild(
   return json(row?.results[0] as Row, created ? 201 : 200);
 }
 
-const INSTALL_ID = /^[0-9a-f]{32}$/;
 
 export interface Erasure {
   done: boolean;
@@ -509,7 +524,7 @@ export async function deleteInstall(
   params: string[],
 ): Promise<Response> {
   const installId = params[0] ?? "";
-  if (!INSTALL_ID.test(installId)) return error("invalid_payload", "install_id: must be 32 lower-case hex characters");
+  if (!ADMIN_PATTERNS.InstallId.test(installId)) return error("invalid_payload", "install_id: must be 32 lower-case hex characters");
   const hash = await installHash(requireSecret(env.INSTALL_HASH_KEY, "INSTALL_HASH_KEY"), installId);
   const { done, ...counts } = await eraseInstall(env, hash);
   return json(counts, done ? 200 : 202);
