@@ -295,10 +295,10 @@ describe("request", () => {
     const fetchImpl = vi.fn(async () => jsonResponse(201, { v: 1, id: "B12345678" }));
     const { turnstile } = await setup({ fetchImpl });
     fillValid({
-      title: "Crash\tin Act II",
-      description: "Line one\nLine two\twith a tab and a bell",
-      version: "0.1.0",
-      contact: "me@example.org",
+      title: "Crash\tin\u0000Act II",
+      description: "Line one\nLine two\twith a tab\u0007 and a bell",
+      version: "0.1.0\u007f",
+      contact: "me\u001b@example.org",
     });
     turnstile.solve("tok");
     submit();
