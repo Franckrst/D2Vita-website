@@ -3,38 +3,20 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { sha256, toHex } from "../src/crypto";
 import { createUploadToken } from "../src/token";
 import { haltClaim } from "./fixtures";
-import { NOW, call, claimRequest, registerBuild, resetDatabase, signatureRow, signedJson } from "./helpers";
+import {
+  NOW,
+  bytesOf,
+  call,
+  claimRequest,
+  completeRequest,
+  putRequest,
+  registerBuild,
+  resetDatabase,
+  signatureRow,
+  signedJson,
+} from "./helpers";
 
 const KiB = 1024;
-
-function bytesOf(n: number, seed = 7): Uint8Array {
-  const out = new Uint8Array(n);
-  for (let i = 0; i < n; i++) out[i] = (i * 31 + seed) & 0xff;
-  return out;
-}
-
-function putRequest(
-  reportId: string,
-  name: string,
-  body: Uint8Array,
-  token: string | null,
-  headers: Record<string, string | null> = {},
-): Request {
-  const h = new Headers({ "content-length": String(body.byteLength), "content-type": "application/octet-stream" });
-  if (token !== null) h.set("authorization", `D2V-Upload ${token}`);
-  for (const [k, v] of Object.entries(headers)) {
-    if (v === null) h.delete(k);
-    else h.set(k, v);
-  }
-  return new Request(`https://api.test/v1/reports/${reportId}/artifacts/${name}`, { method: "PUT", headers: h, body });
-}
-
-function completeRequest(reportId: string, token: string | null, body: unknown = { v: 1, artifacts: [] }): Request {
-  const text = JSON.stringify(body);
-  const h = new Headers({ "content-type": "application/json", "content-length": String(text.length) });
-  if (token !== null) h.set("authorization", `D2V-Upload ${token}`);
-  return new Request(`https://api.test/v1/reports/${reportId}/complete`, { method: "POST", headers: h, body: text });
-}
 
 interface Granted {
   reportId: string;

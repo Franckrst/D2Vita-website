@@ -5,8 +5,9 @@
 import { fromBase64Url, fromHex, sha256, timingSafeEqual, toBase64Url, utf8 } from "./crypto";
 import type { Env } from "./env";
 import { error, json, readBoundedJson } from "./http";
-import { KINDS } from "./types";
-import { validateSignaturePatch } from "./validate";
+import { ARTIFACT_NAMES, KINDS, type ArtifactName } from "./types";
+import { artifactKey } from "./uploads";
+import { validateBugPatch, validateSignaturePatch } from "./validate";
 
 const ADMIN_BODY_MAX_BYTES = 16 * 1024;
 
@@ -28,6 +29,8 @@ export function unauthorized(): Response {
 
 const SIGNATURE_ID = /^S[A-Z2-7]{15}$/;
 const BUILD_ID = /^[0-9]+\.[0-9]+\.[0-9]+\+[0-9a-f]{12}(-dirty)?$/;
+const REPORT_ID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+const BUG_ID = /^B[A-Z2-7]{16}$/;
 
 class BadQuery extends Error {}
 
@@ -272,4 +275,139 @@ export async function getSignature(
   const detail = SIGNATURE_ID.test(id) ? await signatureDetail(env.DB, id) : null;
   if (!detail) return error(404, "not_found", "No such signature");
   return json({ signature: detail });
+}
+
+// ---------------------------------------------------------------------------
+// Reports and sealed pieces.
+
+function parseJson(text: unknown): unknown {
+  return typeof text === "string" ? JSON.parse(text) : null;
+}
+
+export async function getReport(
+  _request: Request,
+  env: Env,
+  _ctx: ExecutionContext,
+  _now: number,
+  params: string[],
+): Promise<Response> {
+  const id = params[0] ?? "";
+  const row = REPORT_ID.test(id) ? await env.DB.prepare("SELECT * FROM reports WHERE report_id = ?1").bind(id).first<Row>() : null;
+  if (!row) return error(404, "not_found", "No such report");
+  return json({
+    report: {
+      report_id: row.report_id,
+      signature: row.signature,
+      raw_signature: row.raw_signature,
+      install_hash: row.install_hash,
+      build_id: row.build_id,
+      channel: row.channel,
+      kind: row.kind,
+      received_at: row.received_at,
+      action: row.action,
+      claim: parseJson(row.claim),
+      decision: parseJson(row.decision),
+      requested: parseJson(row.requested),
+      upload_expires: row.upload_expires,
+      artifacts: parseJson(row.artifacts),
+      completed_at: row.completed_at,
+      sample_stored: row.sample_stored === null ? null : row.sample_stored === 1,
+    },
+  });
+}
+
+export async function getArtifact(
+  _request: Request,
+  env: Env,
+  _ctx: ExecutionContext,
+  _now: number,
+  params: string[],
+): Promise<Response> {
+  const [reportId = "", name = ""] = params;
+  if (!REPORT_ID.test(reportId) || !ARTIFACT_NAMES.includes(name as ArtifactName)) {
+    return error(404, "not_found", "No such piece");
+  }
+  const row = await env.DB.prepare("SELECT signature, build_id, artifacts FROM reports WHERE report_id = ?1")
+    .bind(reportId)
+    .first<{ signature: string; build_id: string; artifacts: string }>();
+  const object = row ? await env.ARTIFACTS.get(artifactKey(row.signature, reportId, name)) : null;
+  if (!row || !object) return error(404, "not_found", "No such piece");
+  const meta = (JSON.parse(row.artifacts) as Record<string, { sha256?: string }>)[name];
+  const headers = new Headers({
+    "content-type": "application/octet-stream",
+    "content-length": String(object.size),
+    "x-d2v-build-id": row.build_id,
+  });
+  if (meta?.sha256) headers.set("x-d2v-sha256", meta.sha256);
+  return new Response(object.body, { headers });
+}
+
+// ---------------------------------------------------------------------------
+// Bugs from the public site.
+
+const BUG_COLUMNS = "id, title, description, version, contact, lang, status, issue_url, note, created_at, updated_at";
+
+export function listBugs(request: Request, env: Env): Promise<Response> {
+  return withBadQuery(async () => {
+    const params = queryParams(new URL(request.url), ["status", "cursor", "limit"]);
+    const status = optionalEnum(params, "status", ["open", "fixed", "ignored"]);
+    const limit = limitParam(params);
+    const cursor = decodeCursor(params.get("cursor"));
+    const where: string[] = [];
+    const binds: unknown[] = [];
+    if (status) where.push(`status = ?${binds.push(status)}`);
+    if (cursor) {
+      const k = binds.push(cursor.k);
+      const id = binds.push(cursor.id);
+      where.push(`(created_at < ?${k} OR (created_at = ?${k} AND id > ?${id}))`);
+    }
+    const sql =
+      `SELECT ${BUG_COLUMNS} FROM bugs ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""} ` +
+      `ORDER BY created_at DESC, id ASC LIMIT ?${binds.push(limit + 1)}`;
+    const { results } = await env.DB.prepare(sql).bind(...binds).all<Row>();
+    const page = results.slice(0, limit);
+    const last = page[page.length - 1];
+    const next = results.length > limit && last ? encodeCursor({ k: last.created_at as number, id: last.id as string }) : null;
+    return json({ items: page, next_cursor: next });
+  });
+}
+
+async function bugById(db: D1Database, id: string): Promise<Row | null> {
+  return BUG_ID.test(id) ? db.prepare(`SELECT ${BUG_COLUMNS} FROM bugs WHERE id = ?1`).bind(id).first<Row>() : null;
+}
+
+export async function getBug(
+  _request: Request,
+  env: Env,
+  _ctx: ExecutionContext,
+  _now: number,
+  params: string[],
+): Promise<Response> {
+  const bug = await bugById(env.DB, params[0] ?? "");
+  if (!bug) return error(404, "not_found", "No such bug");
+  return json({ bug });
+}
+
+export async function patchBug(
+  request: Request,
+  env: Env,
+  _ctx: ExecutionContext,
+  now: number,
+  params: string[],
+): Promise<Response> {
+  const id = params[0] ?? "";
+  const body = await readBoundedJson(request, ADMIN_BODY_MAX_BYTES);
+  if (!body.ok) return body.response;
+  const validation = validateBugPatch(body.value);
+  if (!validation.ok) return error(400, "invalid_payload", validation.error);
+  if (!(await bugById(env.DB, id))) return error(404, "not_found", "No such bug");
+
+  const sets: string[] = [];
+  const binds: unknown[] = [];
+  for (const column of ["status", "issue_url", "note"] as const) {
+    if (validation.value[column] !== undefined) sets.push(`${column} = ?${binds.push(validation.value[column])}`);
+  }
+  sets.push(`updated_at = ?${binds.push(now)}`);
+  await env.DB.prepare(`UPDATE bugs SET ${sets.join(", ")} WHERE id = ?${binds.push(id)}`).bind(...binds).run();
+  return json({ bug: await bugById(env.DB, id) });
 }

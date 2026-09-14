@@ -233,6 +233,9 @@ async function ingest(
   const mine = "EXISTS (SELECT 1 FROM reports WHERE report_id = ?1 AND ingest_nonce = ?2)";
   const statements: D1PreparedStatement[] = [];
 
+  // Only the pseudonym install_hash is stored, never the raw install_id.
+  const { install_id: _notStored, ...storedClaim } = claim;
+
   statements.push(
     db
       .prepare(
@@ -241,7 +244,7 @@ async function ingest(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'count_only')
          ON CONFLICT (report_id) DO NOTHING`,
       )
-      .bind(claim.report_id, nonce, sig, rawId, install, claim.build_id, build.channel, claim.kind, now, JSON.stringify(claim), countOnly),
+      .bind(claim.report_id, nonce, sig, rawId, install, claim.build_id, build.channel, claim.kind, now, JSON.stringify(storedClaim), countOnly),
   );
 
   const regressionIndex = statements.length;
