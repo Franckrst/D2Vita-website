@@ -27,7 +27,7 @@
   "home.links.privacy.title": "Vie privée",
   "home.links.privacy.desc": "Ce que contient un rapport de plantage, et comment le refuser ou le faire supprimer.",
   "home.crash.title": "Après un plantage",
-  "home.crash.body": "Au lancement suivant, D2Vita vous demande si vous voulez envoyer un rapport. Rien n’est envoyé sans votre accord, et les pièces jointes sont chiffrées : seul le mainteneur peut les lire.",
+  "home.crash.body": "Au lancement suivant, D2Vita propose d’envoyer un rapport ; vous pouvez aussi choisir de toujours l’envoyer. Rien n’est envoyé sans votre accord, et les pièces jointes sont chiffrées : seul le mainteneur peut les lire.",
   "home.crash.link": "Ce que contient un rapport",
 
   "page.bug.title": "Signaler un bug — D2Vita",
@@ -79,9 +79,9 @@
   "privacy.updated": "Mise à jour le 14 septembre 2026",
   "privacy.intro": "D2Vita peut envoyer des rapports de plantage à son mainteneur, et ce site permet de signaler un bug. Voici ce qui est collecté, quand, et combien de temps c’est gardé.",
   "privacy.glance.title": "En bref",
-  "privacy.glance.consent": "**Rien n’est envoyé sans votre accord.** Après un plantage, la console vous pose d’abord la question.",
+  "privacy.glance.consent": "**Rien n’est envoyé sans votre accord.** Après un plantage, la console vous pose la question, sauf si vous avez choisi de toujours envoyer.",
   "privacy.glance.sealed": "**Les pièces jointes sont chiffrées sur la console.** Seul le mainteneur peut les lire.",
-  "privacy.glance.secrets": "**Vos clés CD et votre nom de compte ne partent pas :** ils sont effacés des journaux, et un dump qui les contient n’est pas envoyé.",
+  "privacy.glance.secrets": "**Vos clés CD et votre dernier nom de compte Battle.net sont effacés des journaux**, et un dump qui les contient n’est pas envoyé.",
   "privacy.glance.ip": "**Votre adresse IP n’est jamais stockée en clair.**",
   "privacy.glance.delete": "**Vous pouvez faire supprimer vos rapports** grâce à l’[identifiant d’installation](#deletion) affiché par la console.",
   "privacy.toc.title": "Sur cette page",
@@ -92,7 +92,7 @@
   "privacy.when.p3": "Un blocage peut être une fausse alerte, par exemple si le jeu est resté en arrière-plan avant d’être fermé. Le message le signale, et c’est vous qui décidez.",
 
   "privacy.choice.title": "Votre choix",
-  "privacy.choice.intro": "Avant tout envoi, la console affiche un message qui résume le contenu du rapport et propose trois réponses :",
+  "privacy.choice.intro": "Tant que vous n’avez pas choisi de toujours envoyer, la console affiche un message avant tout envoi. Il résume le contenu du rapport et propose trois réponses :",
   "privacy.choice.send": "**✕ Envoyer :** le rapport part pendant que le jeu démarre.",
   "privacy.choice.decline": "**○ Ne pas envoyer :** les rapports en attente sont supprimés de la console.",
   "privacy.choice.always": "**△ Toujours envoyer sans demander :** le choix est enregistré dans `ux0:data/d2vita/reports/consent.txt`. Supprimez ce fichier, ou ajoutez la ligne `D2_CRASHREPORT=ask` à `ux0:data/d2vita/env.txt`, pour que la question revienne.",
@@ -102,7 +102,7 @@
   "privacy.choice.installId": "Sous le message s’affiche, en petit, l’identifiant d’installation. Notez-le si vous voulez un jour faire supprimer vos rapports.",
 
   "privacy.claim.title": "Ce que contient la fiche",
-  "privacy.claim.intro": "Chaque rapport accepté commence par une fiche de 16 Kio au plus. Elle est envoyée en clair et contient :",
+  "privacy.claim.intro": "Chaque rapport que vous acceptez d’envoyer commence par une fiche de 16 Kio au plus. Elle est envoyée en clair et contient :",
   "privacy.claim.reportId.term": "Identifiant du rapport",
   "privacy.claim.reportId.desc": "Généré par la console, pour qu’un même rapport ne soit jamais compté deux fois.",
   "privacy.claim.installId.term": "Identifiant d’installation",
@@ -116,13 +116,13 @@
   "privacy.claim.kind.term": "Type d’erreur",
   "privacy.claim.kind.desc": "Plantage de l’application, arrêt du jeu sur erreur, faute dans le code du jeu, arrêt anormal ou blocage. Les autres traces trouvées sont jointes en indices.",
   "privacy.claim.features.term": "Détails techniques",
-  "privacy.claim.features.desc": "Selon le type : code et emplacement de l’erreur, adresses du plantage (sous la forme `Game+0x1fedf4`), fil en cause et raison de son arrêt.",
+  "privacy.claim.features.desc": "Selon le type : code, exception et emplacement de l’erreur, adresses du plantage (sous la forme `Game+0x1fedf4`), fil en cause et raison de son arrêt, fonction Windows manquante en cause, état du moteur pendant un blocage.",
   "privacy.claim.artifacts.term": "Pièces disponibles",
-  "privacy.claim.artifacts.desc": "Le nom et la taille des pièces jointes prêtes à partir, et le nombre de remplacements faits par le caviardage, jamais les valeurs trouvées.",
+  "privacy.claim.artifacts.desc": "Le nom et la taille des pièces jointes prêtes à partir, l’indication d’un dump retenu, et le nombre de remplacements faits par le caviardage, jamais les valeurs trouvées.",
   "privacy.claim.headers": "Les requêtes de la console indiquent aussi, dans leurs en-têtes, la version de D2Vita et l’identifiant d’installation. La fiche ne contient ni nom de compte, ni clé CD, ni adresse IP.",
 
   "privacy.attach.title": "Les pièces jointes",
-  "privacy.attach.intro": "Si ce type d’erreur est déjà connu, la fiche suffit : le service ajoute un au compteur et ne demande rien d’autre. S’il est nouveau, il demande un seul exemplaire des pièces suivantes.",
+  "privacy.attach.intro": "Si ce type d’erreur est déjà connu, la fiche suffit : le service ajoute un au compteur et ne demande rien d’autre. S’il est nouveau, le service demande les pièces ci-dessous pour un seul rapport de ce type, tous joueurs confondus.",
   "privacy.attach.col.name": "Pièce",
   "privacy.attach.col.content": "Contenu",
   "privacy.attach.col.max": "Taille max.",
@@ -145,7 +145,7 @@
   "privacy.attach.progress.when": "Tous les types",
   "privacy.attach.sizes": "Les tailles maximales s’entendent chiffrement compris.",
   "privacy.attach.resample": "Un nouvel exemplaire peut être demandé si le mainteneur en réclame un, ou si un problème marqué corrigé réapparaît.",
-  "privacy.attach.outbox": "En attendant l’envoi, ces copies restent sur la console dans `ux0:data/d2vita/reports/outbox/` : cinq rapports et 4 Mio au plus, les plus anciens étant supprimés en premier.",
+  "privacy.attach.outbox": "Ces pièces sont préparées sur la console dès le lancement, avant la question, dans `ux0:data/d2vita/reports/outbox/` : le dump système y est déplacé, les journaux y sont copiés, puis le `Crash.txt` d’origine est supprimé. Cinq rapports et 4 Mio au plus y sont gardés, les plus anciens étant supprimés en premier.",
 
   "privacy.redact.title": "Ce qui est effacé avant l’envoi",
   "privacy.redact.p1": "Avant l’envoi, la console recherche dans les pièces jointes vos clés CD de Diablo II et de Lord of Destruction (lues dans `ux0:data/d2vita_secret/keys.txt`, avec ou sans tirets, en majuscules ou en minuscules), le nom de propriétaire enregistré dans ce fichier, et le dernier nom de compte Battle.net retenu par le jeu.",
@@ -172,7 +172,7 @@
   "privacy.retention.bugs.desc": "Supprimés au bout d’un an.",
 
   "privacy.issues.title": "Tickets publics",
-  "privacy.issues.p1": "Le mainteneur peut ouvrir un ticket public sur GitHub pour un type d’erreur. Le brouillon ne reprend que des informations agrégées : type d’erreur, nombre d’occurrences et de consoles, versions touchées, dates de première et de dernière apparition, adresses du plantage. Jamais les journaux ni le dump. Il est relu avant publication.",
+  "privacy.issues.p1": "Le mainteneur peut ouvrir un ticket public sur GitHub pour un type d’erreur. Le brouillon ne reprend que des informations agrégées : identifiant et type de l’erreur, nombre d’occurrences et de consoles, versions touchées, dates de première et de dernière apparition, adresses du plantage. Jamais les journaux ni le dump. Il est relu avant publication.",
 
   "privacy.bugs.title": "Le formulaire de bug",
   "privacy.bugs.sent": "Le formulaire [Signaler un bug](bug.html) envoie, en HTTPS, le titre, la description, la version, le contact si vous en indiquez un, la langue choisie et le jeton de vérification anti-robot.",
@@ -181,7 +181,7 @@
   "privacy.bugs.public": "Le mainteneur peut reprendre un bug dans un ticket public sur GitHub : n’écrivez rien, dans le titre ou la description, que vous ne voudriez pas voir publié.",
 
   "privacy.site.title": "Ce site",
-  "privacy.site.p1": "Ce site est hébergé par GitHub Pages. Il ne lit aucune donnée de plantage et n’utilise aucun outil de mesure d’audience. Il retient seulement la langue choisie, dans le stockage local de votre navigateur.",
+  "privacy.site.p1": "Ce site est hébergé par GitHub Pages. Il ne lit aucune donnée de plantage et n’utilise aucun outil de mesure d’audience. Le site lui-même ne retient que la langue choisie, dans le stockage local de votre navigateur.",
 
   "privacy.delete.title": "Faire supprimer vos données",
   "privacy.delete.p1": "Chaque installation a un identifiant, affiché en petit sous le message de rapport et enregistré dans `ux0:data/d2vita/reports/install_id.txt`.",
