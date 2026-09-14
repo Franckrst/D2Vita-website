@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { sha256, toHex } from "../src/crypto";
+import { utcDay } from "../src/limits";
 import { createUploadToken } from "../src/token";
-import { haltClaim } from "./fixtures";
+import { haltClaim, hostFaultClaim } from "./fixtures";
 import {
   NOW,
   bytesOf,
@@ -35,6 +36,23 @@ async function newUploadDecision(overrides: Record<string, unknown> = {}): Promi
     token: decision.upload.token,
     names: decision.upload.artifacts.map((a: { name: string }) => a.name),
   };
+}
+
+async function byteCounters() {
+  return (await env.DB.prepare("SELECT scope, n FROM rate_counters WHERE scope LIKE 'bytes:%' ORDER BY scope").all()).results;
+}
+
+type Put = (key: string, body: ReadableStream, options?: R2PutOptions) => Promise<R2Object | null>;
+
+// The Worker bindings with an R2 bucket whose put is replaced.
+function withPut(put: Put): Cloudflare.Env {
+  const bucket = {
+    put,
+    get: (key: string) => env.ARTIFACTS.get(key),
+    head: (key: string) => env.ARTIFACTS.head(key),
+    delete: (keys: string | string[]) => env.ARTIFACTS.delete(keys),
+  };
+  return { ...env, ARTIFACTS: bucket as unknown as R2Bucket };
 }
 
 beforeEach(async () => {
@@ -136,12 +154,88 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
   // Note: the local R2 simulator prints two "uncaught exception: Network
   // connection lost" lines for this case even when every promise is observed
   // (checked with a bare FixedLengthStream + put); they are expected.
-  it("refuses a body that does not match its Content-Length and stores nothing", async () => {
+  it("refuses a body that does not match its Content-Length, and stores and charges nothing", async () => {
     const g = await newUploadDecision();
-    const res = await call(putRequest(g.reportId, "crash_txt", bytesOf(5000), g.token, { "content-length": "6000" }));
-    expect(res.status).toBe(400);
-    expect(await signedJson(res)).toMatchObject({ error: "invalid_payload" });
+    for (const [sent, declared] of [
+      [5000, "6000"],
+      [6000, "5000"],
+    ] as const) {
+      const res = await call(putRequest(g.reportId, "crash_txt", bytesOf(sent), g.token, { "content-length": declared }));
+      expect(res.status, `${sent} bytes sent, ${declared} declared`).toBe(400);
+      expect(await signedJson(res)).toMatchObject({ error: "invalid_payload" });
+      expect(await env.ARTIFACTS.head(`artifacts/${g.signature}/${g.reportId}/crash_txt.sealed`)).toBeNull();
+    }
+    const row = await env.DB.prepare("SELECT artifacts FROM reports WHERE report_id = ?1").bind(g.reportId).first();
+    expect(row).toEqual({ artifacts: "{}" });
+    expect(await byteCounters()).toEqual([]);
+  });
+
+  it("charges nothing for an interrupted piece, so its full retry is accepted on a release build", async () => {
+    // Release cap: 3 MiB a day for the installation, and this report needs ~2.27 MiB.
+    const claim = hostFaultClaim({
+      artifacts: [
+        { name: "dump", bytes: 2_000_000 },
+        { name: "crash_log", bytes: 3104 },
+        { name: "boot_progress", bytes: 262144 },
+      ],
+    });
+    const decision = await signedJson(await call(claimRequest(claim)));
+    expect(decision.action).toBe("upload");
+    const reportId = claim.report_id as string;
+    const token = decision.upload.token as string;
+    const dump = bytesOf(2_000_000);
+
+    const cut = await call(putRequest(reportId, "dump", dump.subarray(0, 1_999_999), token, { "content-length": "2000000" }));
+    expect(cut.status).toBe(400);
+    expect(await byteCounters()).toEqual([]);
+
+    expect((await call(putRequest(reportId, "dump", dump, token), NOW + 60)).status).toBe(201);
+    expect((await call(putRequest(reportId, "crash_log", bytesOf(3104), token), NOW + 70)).status).toBe(201);
+    expect((await call(putRequest(reportId, "boot_progress", bytesOf(262144), token), NOW + 80)).status).toBe(201);
+    const done = await call(completeRequest(reportId, token, { v: 1, artifacts: ["dump", "crash_log", "boot_progress"] }), NOW + 90);
+    expect(await signedJson(done)).toMatchObject({ sample_stored: true });
+    const stored = 2_000_000 + 3104 + 262144;
+    expect(await byteCounters()).toEqual([
+      { scope: "bytes:global", n: stored },
+      { scope: "bytes:install", n: stored },
+    ]);
+  });
+
+  it("answers a signed 500 storage_unavailable when R2 fails, charges nothing, and a retry succeeds", async () => {
+    const g = await newUploadDecision();
+    const failing = withPut(async (_key, body) => {
+      await body.cancel(new Error("R2 unavailable"));
+      throw new Error("R2 unavailable");
+    });
+    const res = await call(putRequest(g.reportId, "crash_txt", bytesOf(5000), g.token), NOW, failing);
+    expect(res.status).toBe(500);
+    expect(await signedJson(res)).toMatchObject({ error: "storage_unavailable" });
+    expect(await byteCounters()).toEqual([]);
+    const row = await env.DB.prepare("SELECT artifacts FROM reports WHERE report_id = ?1").bind(g.reportId).first();
+    expect(row).toEqual({ artifacts: "{}" });
+
+    expect((await call(putRequest(g.reportId, "crash_txt", bytesOf(5000), g.token), NOW + 30)).status).toBe(201);
+  });
+
+  it("undoes a stored piece and gives its charge back when another upload took the budget meanwhile", async () => {
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cap:global_artifact_bytes', '1000')").run();
+    const g = await newUploadDecision();
+    const racing = withPut(async (key, body, options) => {
+      const object = await env.ARTIFACTS.put(key, body, options);
+      // Another console's piece is charged while this body streams.
+      await env.DB.prepare("INSERT INTO rate_counters (scope, subject, day, n) VALUES ('bytes:global', '*', ?1, 900)")
+        .bind(utcDay(NOW))
+        .run();
+      return object;
+    });
+    const res = await call(putRequest(g.reportId, "crash_txt", bytesOf(600), g.token), NOW, racing);
+    expect(res.status).toBe(429);
+    expect(await signedJson(res)).toMatchObject({ error: "rate_limited" });
     expect(await env.ARTIFACTS.head(`artifacts/${g.signature}/${g.reportId}/crash_txt.sealed`)).toBeNull();
+    expect(await byteCounters()).toEqual([
+      { scope: "bytes:global", n: 900 },
+      { scope: "bytes:install", n: 0 },
+    ]);
     const row = await env.DB.prepare("SELECT artifacts FROM reports WHERE report_id = ?1").bind(g.reportId).first();
     expect(row).toEqual({ artifacts: "{}" });
   });

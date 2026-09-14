@@ -3,14 +3,29 @@
 //
 // Bodies are streamed straight into R2 (never buffered): the size is checked
 // from Content-Length before anything is read, and a FixedLengthStream makes
-// R2 refuse a body that does not match it. The SHA-256 is computed by a tap
-// on the same stream. R2 custom metadata has to be given when the put starts,
-// so the hash is recorded in D1 (reports.artifacts) instead of R2 metadata.
+// R2 refuse a body that does not match it. The SHA-256 is computed on the same
+// stream. R2 custom metadata has to be given when the put starts, so the hash
+// is recorded in D1 (reports.artifacts) instead of R2 metadata.
+//
+// The daily byte budget is charged for stored pieces only. A read-only check
+// refuses before the body is read when the budget is already short; the atomic
+// charge happens once the piece is stored. A failed attempt (connection lost,
+// storage error) costs nothing, so a console can retry an interrupted piece
+// within its caps, and repeating failures writes nothing to D1.
 
 import { toHex } from "./crypto";
 import { requireSecret, type Env } from "./env";
 import { declaredLength, error, json, readBoundedJson } from "./http";
-import { SCOPE, consumeAll, installCaps, loadSettings, rateLimited, utcDay } from "./limits";
+import {
+  SCOPE,
+  consumeAllOrNothing,
+  hasRoom,
+  installCaps,
+  loadSettings,
+  rateLimited,
+  utcDay,
+  type LimitCheck,
+} from "./limits";
 import { verifyUploadToken, type UploadGrant } from "./token";
 import type { Channel } from "./types";
 import { validateComplete } from "./validate";
@@ -52,39 +67,81 @@ async function loadReport(db: D1Database, reportId: string): Promise<ReportForUp
     .first<ReportForUpload>();
 }
 
-// One pass: request body -> hashing tap -> FixedLengthStream -> R2. The tap
-// feeds each chunk to a native DigestStream (workerd cannot pipe a tee()
-// branch into a FixedLengthStream). FixedLengthStream makes the put fail, and
-// store nothing, when the body is shorter or longer than declared.
+type StreamResult =
+  | { ok: true; sha256: string }
+  // "body": the client's fault (length differs from Content-Length, connection
+  // lost); "storage": R2 failed while the body was fine.
+  | { ok: false; cause: "body" | "storage"; error: unknown };
+
+// One pass: request body -> counting and hashing stream -> FixedLengthStream
+// -> R2. The body is pulled one chunk at a time, fed to a native DigestStream
+// and passed on (workerd cannot pipe a tee() branch into a FixedLengthStream).
+// Counting here tells a bad body from a storage failure; FixedLengthStream
+// makes the put fail, and store nothing, when the length is wrong.
 async function streamToR2(
   bucket: R2Bucket,
   key: string,
   body: ReadableStream<Uint8Array> | null,
   length: number,
   customMetadata: Record<string, string>,
-): Promise<string> {
-  const source = body ?? new ReadableStream<Uint8Array>({ start: (c) => c.close() });
+): Promise<StreamResult> {
+  const source = (body ?? new ReadableStream<Uint8Array>({ start: (c) => c.close() })).getReader();
   const digest = new crypto.DigestStream("SHA-256");
   const hashed = digest.digest;
   hashed.catch(() => {}); // observed below on success; a failed upload must not leave it unhandled
   const hashWriter = digest.getWriter();
-  const tap = new TransformStream<Uint8Array, Uint8Array>({
-    async transform(chunk, controller) {
-      await hashWriter.write(chunk);
-      controller.enqueue(chunk);
+  let received = 0;
+  let badBody = false;
+
+  const counted = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      let next: ReadableStreamReadResult<Uint8Array>;
+      try {
+        next = await source.read();
+      } catch (e) {
+        badBody = true; // the client went away mid-body
+        throw e;
+      }
+      if (next.done) {
+        if (received !== length) {
+          badBody = true;
+          throw new Error("body shorter than Content-Length");
+        }
+        await hashWriter.close();
+        controller.close();
+        return;
+      }
+      received += next.value.byteLength;
+      if (received > length) {
+        badBody = true;
+        source.cancel().catch(() => {});
+        throw new Error("body longer than Content-Length");
+      }
+      await hashWriter.write(next.value);
+      controller.enqueue(next.value);
     },
-    async flush() {
-      await hashWriter.close();
+    cancel(reason) {
+      return source.cancel(reason);
     },
   });
+
   const fixed = new FixedLengthStream(length);
-  const outcomes = await Promise.allSettled([
-    source.pipeThrough(tap).pipeTo(fixed.writable),
+  const [piped, put] = await Promise.allSettled([
+    counted.pipeTo(fixed.writable),
     bucket.put(key, fixed.readable, { customMetadata, httpMetadata: { contentType: "application/octet-stream" } }),
   ]);
-  const failed = outcomes.find((o): o is PromiseRejectedResult => o.status === "rejected");
-  if (failed) throw failed.reason;
-  return toHex(new Uint8Array(await hashed));
+  if (piped.status === "fulfilled" && put.status === "fulfilled") {
+    return { ok: true, sha256: toHex(new Uint8Array(await hashed)) };
+  }
+  hashWriter.abort().catch(() => {});
+  // Defensive: never keep an object whose body failed.
+  if (put.status === "fulfilled") await bucket.delete(key);
+  const reason = piped.status === "rejected" ? piped.reason : (put as PromiseRejectedResult).reason;
+  return { ok: false, cause: badBody ? "body" : "storage", error: reason };
+}
+
+function recordedPieces(report: { artifacts: string }): Record<string, unknown> {
+  return JSON.parse(report.artifacts) as Record<string, unknown>;
 }
 
 export async function handleUpload(
@@ -108,32 +165,41 @@ export async function handleUpload(
   const report = await loadReport(env.DB, reportId);
   if (!report || report.action !== "upload") return error(403, "bad_token", "No upload is expected for this report");
   if (report.completed_at !== null) return error(409, "exists", "This report is already complete");
-  if ((JSON.parse(report.artifacts) as Record<string, unknown>)[name]) {
-    return error(409, "exists", "This piece is already stored");
-  }
+  if (recordedPieces(report)[name]) return error(409, "exists", "This piece is already stored");
 
   const settings = await loadSettings(env.DB);
   const perInstall = installCaps(settings.caps, report.channel);
-  const refused = await consumeAll(env.DB, utcDay(now), [
+  const day = utcDay(now);
+  const budget: LimitCheck[] = [
     { scope: SCOPE.installBytes, subject: report.install_hash, amount: declared, cap: perInstall.bytes },
     { scope: SCOPE.globalBytes, subject: "*", amount: declared, cap: settings.caps.global_artifact_bytes },
-  ]);
-  if (refused) return rateLimited(now);
+  ];
+  if (!(await hasRoom(env.DB, day, budget))) return rateLimited(now);
 
-  let hash: string;
-  try {
-    hash = await streamToR2(env.ARTIFACTS, artifactKey(grant.signature, reportId, name), request.body, declared, {
-      bytes: String(declared),
-      build_id: report.build_id,
-    });
-  } catch {
-    return error(400, "invalid_payload", "Body does not match Content-Length");
+  const key = artifactKey(grant.signature, reportId, name);
+  const stored = await streamToR2(env.ARTIFACTS, key, request.body, declared, {
+    bytes: String(declared),
+    build_id: report.build_id,
+  });
+  if (!stored.ok) {
+    if (stored.cause === "body") return error(400, "invalid_payload", "Body does not match Content-Length");
+    console.error("artifact storage failed:", stored.error instanceof Error ? stored.error.message : String(stored.error));
+    return error(500, "storage_unavailable", "The piece could not be stored, retry later");
+  }
+
+  if (await consumeAllOrNothing(env.DB, day, budget)) {
+    // Another upload took the last of the budget while this body streamed:
+    // undo this one. If a concurrent PUT of the same piece was recorded
+    // meanwhile, the object is that record's and stays.
+    const current = await loadReport(env.DB, reportId);
+    if (!current || !recordedPieces(current)[name]) await env.ARTIFACTS.delete(key);
+    return rateLimited(now);
   }
 
   await env.DB.prepare("UPDATE reports SET artifacts = json_set(artifacts, '$.' || ?2, json(?3)) WHERE report_id = ?1")
-    .bind(reportId, name, JSON.stringify({ bytes: declared, sha256: hash, uploaded_at: now }))
+    .bind(reportId, name, JSON.stringify({ bytes: declared, sha256: stored.sha256, uploaded_at: now }))
     .run();
-  return json({ report_id: reportId, name, bytes: declared, sha256: hash }, 201);
+  return json({ report_id: reportId, name, bytes: declared, sha256: stored.sha256 }, 201);
 }
 
 export async function handleComplete(
@@ -159,7 +225,7 @@ export async function handleComplete(
   if (!report || report.action !== "upload") return error(403, "bad_token", "No upload is expected for this report");
   if (report.completed_at !== null) return json({ sample_stored: report.sample_stored === 1 });
 
-  const stored = JSON.parse(report.artifacts) as Record<string, unknown>;
+  const stored = recordedPieces(report);
   const missing = grant.artifacts.filter((a) => !stored[a.name]).map((a) => a.name);
   if (missing.length > 0) {
     return error(409, "incomplete", "Some requested pieces are not stored yet", { missing });

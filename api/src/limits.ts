@@ -90,11 +90,47 @@ export interface LimitCheck {
 
 // Consumes the counters in order (most specific first) and stops at the first
 // refusal, so a client blocked by its own cap does not eat the global budget.
+// Counters already taken stay taken: a refusal writes nothing more.
 export async function consumeAll(db: D1Database, day: string, checks: LimitCheck[]): Promise<LimitCheck | null> {
   for (const check of checks) {
     if (!(await consume(db, check.scope, check.subject, day, check.amount, check.cap))) return check;
   }
   return null;
+}
+
+// Gives back an amount taken by consume (never below zero).
+export async function release(db: D1Database, scope: string, subject: string, day: string, amount: number): Promise<void> {
+  await db
+    .prepare("UPDATE rate_counters SET n = n - ?4 WHERE scope = ?1 AND subject = ?2 AND day = ?3 AND n >= ?4")
+    .bind(scope, subject, day, amount)
+    .run();
+}
+
+// Like consumeAll, but a refusal gives back the counters already taken, so a
+// refused request is charged nothing. A refusal costs extra writes: use it only
+// where it cannot be repeated cheaply (after a stored upload).
+export async function consumeAllOrNothing(db: D1Database, day: string, checks: LimitCheck[]): Promise<LimitCheck | null> {
+  const taken: LimitCheck[] = [];
+  for (const check of checks) {
+    if (!(await consume(db, check.scope, check.subject, day, check.amount, check.cap))) {
+      for (const t of taken) await release(db, t.scope, t.subject, day, t.amount);
+      return check;
+    }
+    taken.push(check);
+  }
+  return null;
+}
+
+// Read-only: whether every counter could still take its amount. Lets a route
+// refuse before reading a body; the atomic consume still decides afterwards.
+export async function hasRoom(db: D1Database, day: string, checks: LimitCheck[]): Promise<boolean> {
+  if (checks.length === 0) return true;
+  const results = await db.batch<{ n: number }>(
+    checks.map((c) =>
+      db.prepare("SELECT n FROM rate_counters WHERE scope = ?1 AND subject = ?2 AND day = ?3").bind(c.scope, c.subject, day),
+    ),
+  );
+  return checks.every((c, i) => (results[i]?.results[0]?.n ?? 0) + c.amount <= c.cap);
 }
 
 export function installCaps(caps: Caps, channel: Channel): { claims: number; bytes: number } {

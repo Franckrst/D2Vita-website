@@ -64,10 +64,14 @@ answers 429; unknown build 403; forged, expired or unrequested upload token
 403; missing or oversized `Content-Length` 413; regression reopens a fixed
 signature; merges; CORS; Turnstile; cron retention.
 
-The upload test "refuses a body that does not match its Content-Length" makes
-the local R2 simulator print two `uncaught exception … Network connection
-lost` lines. They come from the simulator itself (reproduced with a bare
-`FixedLengthStream` + `put` and every promise observed) and are expected.
+The upload tests that cut a body short or send too much ("refuses a body that
+does not match its Content-Length", "charges nothing for an interrupted
+piece") make the local R2 simulator print two `uncaught exception … Network
+connection lost` lines and one workerd `fixed-length pipe ended prematurely`
+trace per aborted put (three puts). They come from the simulator itself
+(reproduced with a bare `FixedLengthStream` + `put` and every promise observed;
+the storage-failure test, which replaces the simulator's put, prints none) and
+are expected.
 
 ## Local development
 
@@ -97,7 +101,7 @@ Requests carry `X-D2V-Client: d2vita/<build_id>` and `X-D2V-Install: <install_id
 | Method | Path | Answers |
 |---|---|---|
 | POST | `/v1/claims` | `200` decision · `400 invalid_payload` · `403 unknown_build` · `413` · `429 rate_limited` · `503 not_accepting` |
-| PUT | `/v1/reports/{report_id}/artifacts/{name}` | `201 {name, bytes, sha256}` · `400` (body shorter/longer than declared) · `403 bad_token` · `409 exists` · `413` · `429` |
+| PUT | `/v1/reports/{report_id}/artifacts/{name}` | `201 {name, bytes, sha256}` · `400` (body shorter/longer than declared, or cut off) · `403 bad_token` · `409 exists` · `413` · `429` · `500 storage_unavailable` (R2 failed: retry later) |
 | POST | `/v1/reports/{report_id}/complete` | `200 {"sample_stored":bool}` · `400` · `403 bad_token` · `409 incomplete` |
 
 Decision (`action` is `upload` or `count_only`; `upload` is `null` for `count_only`):
@@ -151,6 +155,14 @@ the length of the sample lease).
 - The claim schema accepts an optional top-level `redactions` count. Feature
   fields may be missing or `null` (written `-` in the canon); unknown fields are
   rejected. Free-text fields are printable ASCII without `|`.
+- The daily byte caps are charged for **stored** pieces only. A read-only check
+  answers 429 before the body is read when the budget is already short; the
+  atomic charge happens once R2 has the piece (if another upload took the last
+  bytes meanwhile, the piece is deleted and the answer is 429). A failed attempt
+  costs nothing, so a console can retry a piece cut off by a Wi-Fi drop within
+  its 3 MiB, and repeated failures write nothing to D1. A storage failure is a
+  `500 storage_unavailable`, not a 400, and not a 503, which the spec reserves
+  for the kill switch (`not_accepting` with `disable_until_unix`).
 - The SHA-256 of a piece is recorded in D1 (`reports.artifacts`) and returned
   as `X-D2V-SHA256`; R2 custom metadata carries `bytes` and `build_id`. R2 needs
   metadata before a streamed body starts, and bodies are never buffered.

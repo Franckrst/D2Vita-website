@@ -4,6 +4,8 @@ import {
   DEFAULT_CAPS,
   consume,
   consumeAll,
+  consumeAllOrNothing,
+  hasRoom,
   installCaps,
   ipHash,
   loadSettings,
@@ -82,6 +84,39 @@ describe("consume (atomic conditional counter)", () => {
     const global = await env.DB.prepare("SELECT n FROM rate_counters WHERE scope = 'claims:global'").first();
     expect(global).toBeNull();
     expect(await consumeAll(env.DB, day, [{ scope: "claims:install", subject: "i2", amount: 1, cap: 3 }])).toBeNull();
+  });
+
+  it("consumeAllOrNothing gives back what it took when a later counter refuses", async () => {
+    const day = utcDay(T);
+    await consume(env.DB, "bytes:global", "*", day, 900, 1000);
+    const checks = [
+      { scope: "bytes:install", subject: "i1", amount: 600, cap: 3 * MiB },
+      { scope: "bytes:global", subject: "*", amount: 600, cap: 1000 },
+    ];
+    expect((await consumeAllOrNothing(env.DB, day, checks))?.scope).toBe("bytes:global");
+    const rows = await env.DB.prepare("SELECT scope, n FROM rate_counters ORDER BY scope").all();
+    expect(rows.results).toEqual([
+      { scope: "bytes:global", n: 900 },
+      { scope: "bytes:install", n: 0 },
+    ]);
+    expect(await consumeAllOrNothing(env.DB, day, [{ ...checks[0]!, amount: 100 }, { ...checks[1]!, amount: 100 }])).toBeNull();
+    const after = await env.DB.prepare("SELECT scope, n FROM rate_counters ORDER BY scope").all();
+    expect(after.results).toEqual([
+      { scope: "bytes:global", n: 1000 },
+      { scope: "bytes:install", n: 100 },
+    ]);
+  });
+
+  it("hasRoom tells whether every counter can take its amount, without writing", async () => {
+    const day = utcDay(T);
+    await consume(env.DB, "bytes:install", "i1", day, 2 * MiB, 3 * MiB);
+    const install = { scope: "bytes:install", subject: "i1", amount: MiB, cap: 3 * MiB };
+    const global = { scope: "bytes:global", subject: "*", amount: MiB, cap: 300 * MiB };
+    expect(await hasRoom(env.DB, day, [install, global])).toBe(true);
+    expect(await hasRoom(env.DB, day, [{ ...install, amount: MiB + 1 }, global])).toBe(false);
+    expect(await hasRoom(env.DB, day, [install, { ...global, cap: MiB - 1 }])).toBe(false);
+    const rows = await env.DB.prepare("SELECT scope, n FROM rate_counters").all();
+    expect(rows.results).toEqual([{ scope: "bytes:install", n: 2 * MiB }]);
   });
 });
 
