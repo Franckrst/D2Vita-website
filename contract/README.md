@@ -85,8 +85,13 @@ Errors use `admin.v1#ErrorBody` (codes below).
 | Method and path | Request | Success | Errors |
 |---|---|---|---|
 | `POST /v1/claims` | `claim.v1`, at most 16384 bytes | 200 `decision.v1` | 400 `invalid_payload`, 403 `unknown_build`, 413 `payload_too_large`, 429 `rate_limited`, 503 `not_accepting` |
-| `PUT /v1/reports/{report_id}/artifacts/{name}` | sealed bytes (`sealed-format.md`), `Content-Length` required, at most `max_bytes` | 201 `decision.v1#ArtifactStored` | 403 `bad_token`, 409 `exists`, 413 `payload_too_large`, 429 `rate_limited` |
-| `POST /v1/reports/{report_id}/complete` | `decision.v1#CompleteRequest` | 200 `decision.v1#CompleteResponse` | 403 `bad_token`, 409 `incomplete` |
+| `PUT /v1/reports/{report_id}/artifacts/{name}` | sealed bytes (`sealed-format.md`), `Content-Length` required, at most `max_bytes` | 201 `decision.v1#ArtifactStored` | 400 `invalid_payload`, 403 `bad_token`, 409 `exists`, 413 `payload_too_large`, 429 `rate_limited`, 503 `not_accepting` |
+| `POST /v1/reports/{report_id}/complete` | `decision.v1#CompleteRequest` | 200 `decision.v1#CompleteResponse` | 400 `invalid_payload`, 403 `bad_token`, 409 `incomplete`, 503 `not_accepting` |
+
+The kill switch (503 `not_accepting`) applies to every console route. A
+`report_id` or `name` in a path that does not match `claim.v1#ReportId` or
+`claim.v1#ArtifactName`, and a `complete` body that is not a
+`decision.v1#CompleteRequest`, give 400 `invalid_payload`.
 
 **Public site** (HTTPS, CORS for `https://franckrst.github.io`). Not signed.
 
@@ -124,6 +129,18 @@ missing or wrong token gives 401 `unauthorized`.
 
 The design lists 403 for `complete` without naming its header: this contract
 uses the upload token there too.
+
+The console sends `X-D2V-Client` and `X-D2V-Install` with every request.
+
+- On `POST /v1/claims` they must match the claim: `X-D2V-Install` equals
+  `install_id`, and `X-D2V-Client` equals `d2vita/` followed by `build_id`.
+  A missing or different header gives 400 `invalid_payload`. The Worker may
+  read the headers to refuse an unknown build or a capped installation before
+  reading the body; the per-installation caps count the claim's `install_id`,
+  which is the same value.
+- On `PUT` and `complete` the report comes from the path and the upload
+  token. The Worker counts artifact bytes against the installation of that
+  report and does not use these headers.
 
 ## Response signatures
 
@@ -165,13 +182,37 @@ request:
   `exists` and `incomplete`.
 - The console deletes a pending report only after a verified body that names
   it: a decision with `action: count_only`, or a `CompleteResponse`.
-- `429 rate_limited` and `503 not_accepting` are honoured even without
+- 429 `rate_limited` and 503 `not_accepting` are honoured even without
   `report_id`: the daily caps and the kill switch are not per report, and the
   Worker may answer them before reading the claim. Their effect cannot outlast
   what the Worker signed (`disable_until_unix` is absolute).
 - Status codes are not signed. The console reads a body with the schema that
   its status announces (a 2xx success body, otherwise `ErrorBody`) and treats
   a body that does not match like a network failure.
+
+## Retries
+
+The console repeats a request that got no verified answer: network failure,
+timeout, missing or invalid signature, or a body that names another request.
+Every console request is safe to repeat.
+
+- `POST /v1/claims`: a claim whose `report_id` the Worker already accepted
+  gets the stored decision again, and nothing is counted (design, section
+  5.2). The decision keeps its `upload.token` and `upload.expires_unix`; once
+  they have expired, PUT and complete answer 403 `bad_token`, and the report
+  stays pending under the degraded mode of design section 4.8 (dropped after
+  3 failures or 7 days).
+- `PUT .../artifacts/{name}`: 409 `exists` means that an object is already
+  stored for this report and artifact, which is what a console sees when the
+  answer to its earlier PUT was lost. The console counts the artifact as
+  stored, provided the verified body names that report and artifact, and
+  goes on with the next one. The Worker does not compare bytes: sealing again
+  draws a new ephemeral key and nonce prefix, so a correct retry can differ
+  from the stored object.
+- `POST .../complete`: idempotent. Once a `complete` has succeeded, repeating
+  it returns 200 with the same `CompleteResponse`. 409 `incomplete` means that
+  a requested artifact is missing: the console uploads it, then completes
+  again.
 
 ## Error codes
 
@@ -181,7 +222,7 @@ request:
 <!-- error-codes:begin -->
 | Code | Status | Meaning |
 |---|---|---|
-| `invalid_payload` | 400 | Body is not JSON, or does not match its schema; bad path parameter |
+| `invalid_payload` | 400 | Body is not JSON, or does not match its schema; bad path parameter; console header missing or different from the claim |
 | `unauthorized` | 401 | Admin route without the right bearer token |
 | `unknown_build` | 403 | Claim for a `build_id` that was never registered |
 | `bad_token` | 403 | Upload token missing, forged, expired, or artifact not requested |
@@ -193,7 +234,7 @@ request:
 | `payload_too_large` | 413 | `Content-Length` missing, or above the limit (checked before reading) |
 | `rate_limited` | 429 | A daily cap is reached (design, section 5.5) |
 | `internal_error` | 500 | Unexpected server failure |
-| `not_accepting` | 503 | Kill switch on |
+| `not_accepting` | 503 | Kill switch on (every console route) |
 <!-- error-codes:end -->
 
 ## Notes for implementers
@@ -281,6 +322,15 @@ d2-vita) leaves these points open; v1 settles them as follows.
     and `artifact`), and the console checks them against its request. The
     signature itself stays over the body alone, as section 5.2 says, instead
     of also covering the method, path and status.
+18. PUT and complete can also answer 400 `invalid_payload` and 503
+    `not_accepting`: section 5.5 calls the kill switch global, and section
+    5.2 lists 503 for claims only.
+19. Retries: 409 `exists` on a PUT counts as stored, `complete` is
+    idempotent, and a replayed claim keeps its original upload token.
+20. On claims, `X-D2V-Install` and `X-D2V-Client` must equal the claim's
+    `install_id` and `build_id` (400 otherwise), and the caps count the
+    claim's `install_id`; on PUT and complete the report of the token
+    decides.
 
 ## Monocypher
 

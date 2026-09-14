@@ -45,6 +45,49 @@ class ReadmeTest(unittest.TestCase):
         schema = check_schemas.load_schemas()["admin.v1"]["$defs"]["ErrorBody"]["properties"]["error"]["enum"]
         self.assertEqual(sorted(schema), sorted(code for code, _ in codes))
 
+    def error_code_statuses(self):
+        block = re.search(r"<!-- error-codes:begin -->(.*?)<!-- error-codes:end -->", self.text, re.S)
+        return {code: status for code, status in re.findall(r"^\| `([a-z_]+)` \| ([0-9]{3}) \|", block.group(1), re.M)}
+
+    def section(self, title):
+        match = re.search(rf"^## {re.escape(title)}\n(.*?)(?=^## |\Z)", self.text, re.S | re.M)
+        self.assertIsNotNone(match, f"section {title!r} not found")
+        return match.group(1)
+
+    def test_errors_named_anywhere_use_the_status_of_their_code(self):
+        statuses = self.error_code_statuses()
+        pairs = re.findall(r"\b([0-9]{3}) `([a-z_]+)`", self.text)
+        self.assertGreater(len(pairs), 20)
+        self.assertNotRegex(self.text, r"`[0-9]{3} [a-z_]+`")  # always 429 `rate_limited`
+        for status, code in pairs:
+            with self.subTest(code=code):
+                self.assertEqual(statuses[code], status)
+
+    def test_console_routes_list_their_errors(self):
+        expected = {
+            "POST /v1/claims": {"400 invalid_payload", "403 unknown_build", "413 payload_too_large",
+                                "429 rate_limited", "503 not_accepting"},
+            "PUT /v1/reports/{report_id}/artifacts/{name}": {"400 invalid_payload", "403 bad_token", "409 exists",
+                                                             "413 payload_too_large", "429 rate_limited",
+                                                             "503 not_accepting"},
+            "POST /v1/reports/{report_id}/complete": {"400 invalid_payload", "403 bad_token", "409 incomplete",
+                                                      "503 not_accepting"},
+        }
+        rows = {line.split("|")[1].strip().strip("`"): line.split("|")[-2]
+                for line in self.section("Routes and messages").splitlines() if line.startswith("| `P")}
+        for route, errors in expected.items():
+            with self.subTest(route=route):
+                self.assertIn(route, rows)
+                self.assertEqual(errors, {f"{status} {code}"
+                                          for status, code in re.findall(r"([0-9]{3}) `([a-z_]+)`", rows[route])})
+
+    def test_retries_cover_every_console_route(self):
+        retries = self.section("Retries")
+        for route in ("POST /v1/claims", "PUT .../artifacts/{name}", "POST .../complete"):
+            with self.subTest(route=route):
+                self.assertIn(f"`{route}`", retries)
+        self.assertIn("409 `exists`", retries)
+
     def test_schema_references_exist(self):
         schemas = check_schemas.load_schemas()
         references = re.findall(r"`((?:claim|decision|bug|admin)\.v1)(?:#([A-Za-z]+))?`", self.text)
