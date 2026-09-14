@@ -165,6 +165,8 @@ export function initBugForm({
     sending: false,
     message: null,
     langChosen: false,
+    widgetLanguage: null,
+    widgetStale: false,
   };
   let widgetApi = null;
   let widgetId = null;
@@ -261,6 +263,7 @@ export function initBugForm({
     state.token = null;
     if (widgetId !== null) widgetApi.remove(widgetId);
     widgetId = widgetApi.render(widgetBox, widgetOptions());
+    state.widgetLanguage = i18n.lang;
   }
 
   function resetWidget() {
@@ -319,7 +322,7 @@ export function initBugForm({
     state.sending = false;
     renderSending();
     // A Turnstile token is single-use, whatever the outcome.
-    resetWidget();
+    state.token = null;
 
     if (result.ok) {
       successId.textContent = result.id || "";
@@ -327,8 +330,11 @@ export function initBugForm({
       form.hidden = true;
       success.hidden = false;
       success.focus();
+      // The widget is refreshed when the form is shown again, not while hidden.
+      state.widgetStale = true;
       return;
     }
+    resetWidget();
     state.message =
       result.reason === "rateLimited"
         ? result.retryAfterS
@@ -348,13 +354,18 @@ export function initBugForm({
     renderAll();
     success.hidden = true;
     form.hidden = false;
+    if (widgetApi && state.widgetStale) {
+      if (state.widgetLanguage === i18n.lang) resetWidget();
+      else renderWidget();
+    }
+    state.widgetStale = false;
     controls.title.focus();
   });
 
   i18n.onChange((lang) => {
     if (!state.langChosen) langSelect.value = lang;
     renderAll();
-    if (widgetApi) renderWidget();
+    if (widgetApi && !form.hidden) renderWidget();
   });
 
   langSelect.value = i18n.lang;

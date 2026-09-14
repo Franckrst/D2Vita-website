@@ -324,13 +324,37 @@ describe("responses", () => {
     expect($("#bug-success-id").textContent).toBe("B01J9Z6T4Q8");
     expect(document.activeElement).toBe($("#bug-success"));
     expect($("#bug-progress").textContent).toBe("");
-    expect(turnstile.api.reset).toHaveBeenCalled();
+    // The spent token is dropped at once; the widget itself is reset when the
+    // form is shown again (resetting it while hidden upsets Turnstile).
+    expect(turnstile.api.reset).not.toHaveBeenCalled();
 
     $("#bug-again").click();
+    expect(turnstile.api.reset).toHaveBeenCalledTimes(1);
     expect($("#bug-success").hidden).toBe(true);
     expect($("#bug-form").hidden).toBe(false);
     expect($("#bug-title").value).toBe("");
     expect(document.activeElement).toBe($("#bug-title"));
+
+    fillValid();
+    submit();
+    expect(errorText("turnstile")).toBe(dicts.fr["bug.error.turnstileMissing"]);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("rebuilds the widget in the current language when a new report starts", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { v: 1, id: "B9" }));
+    const { i18n, turnstile } = await setup({ fetchImpl });
+    fillValid();
+    turnstile.solve();
+    submit();
+    await vi.waitFor(() => expect($("#bug-success").hidden).toBe(false));
+
+    await i18n.setLanguage("en");
+    expect(turnstile.api.remove).not.toHaveBeenCalled();
+
+    $("#bug-again").click();
+    expect(turnstile.api.remove).toHaveBeenCalledWith("widget-1");
+    expect(turnstile.widgets.at(-1).options.language).toBe("en");
   });
 
   const failures = [
