@@ -1,0 +1,22 @@
+{
+  "name": "d2vita-crash-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "D2Vita crash-report API (Cloudflare Worker + D1 + R2)",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev": "wrangler dev --local"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.22.0",
+    "@cloudflare/workers-types": "5.20260914.1",
+    "@vitest/runner": "4.1.11",
+    "@vitest/snapshot": "4.1.11",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "4.1.11",
+    "wrangler": "4.124.0"
+  }
+}
