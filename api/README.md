@@ -249,18 +249,6 @@ signature from a known console, 12 from a new console, 17 for a new signature
 (including the once-a-day IP salt). New signatures are capped at 200 per day,
 so the daily worst case stays near 25 000 writes (free quota: 100 000).
 
-**Database size.** D1 Free refuses every write once a database reaches 500 MB
-(claims, bugs and admin writes then fail). Measured growth per claim with the
-local simulator: about 1.2 KB for a typical claim (the spec example, 518 bytes
-of JSON) and 2.2 KB for a maximum-size one (1 182 bytes), plus about 0.2 KB when
-the console is new to the family (link row and a rate counter, the counter
-being deleted two days later). At the default cap of 2 000 claims a day kept
-180 days, that is roughly 0.43 to 0.51 GB for typical claims and 0.8 to 0.9 GB
-for maximum-size ones: only a flood at the caps sustained for months gets
-there. `GET /v1/admin/stats` returns `database_bytes`, and the daily cron logs
-it. Levers if it climbs: lower `global_claims` (settings, immediate), switch
-claims off, or move to D1 paid (10 GB).
-
 ### Retention (cron)
 
 In this order:
@@ -283,6 +271,70 @@ call for erasure) continues. An idle cron run executes 12 statements and needs
 15 of its budget (a piece-purge round reserves two before it knows whether
 anything is left); each round of up to 50 reports whose pieces it deletes adds
 two. The summary it logs says `complete`.
+
+## Capacity
+
+Three things fill up on the free plans: the D1 database (500 MB, after which
+**every write fails** — claims, bugs and admin writes alike), the R2 bucket
+(10 GB), and the daily quotas (100 000 requests, 100 000 D1 writes, 5 M D1
+reads). The caps and the retention above are what keep them in bounds; the
+numbers here say how much room the defaults actually leave.
+
+**Per claim in D1.** Measured on the local simulator by sending 40 claims and
+reading `meta.size_after` before and after (page-granular, so the average over
+40 is the useful figure):
+
+| Claim | JSON | D1 growth |
+|---|---|---|
+| Typical (the spec example), family and console already known | 516 B | **1.1 KB** |
+| Typical, new family and new console | 516 B | **2.5 KB** |
+| Large (16 frames, a location, three pieces, hints), family and console known | 1 271 B | **2.2 KB** |
+| Large, new family and new console | 1 271 B | **4.7 KB** |
+
+A claim keeps its whole JSON, so the size follows what the console sends; a new
+family adds the signature row, its per-build counter and the per-console link;
+the daily rate counters in those figures are deleted two days later by the cron.
+
+**What the defaults imply.** At the global cap a day holds at most 200 new
+families and 1 800 repeats, so 2.5 MB of D1 a day with typical claims and
+4.9 MB with large ones. Claims are kept 180 days, so a flood sustained at the
+cap settles between **0.45 GB and 0.88 GB**, before the bugs (100 a day for a
+year, about 36 MB) and the aggregate rows retention keeps for good. The upper
+half of that range is **past the 500 MB wall**, where D1 Free refuses every
+write. Nothing near it is expected from a few hundred players, but the default
+caps alone do not guarantee the database stays writable.
+
+**R2.** One sealed sample per family, at most 2.4 MiB (a 2 MiB dump plus the
+logs), bounded by `global_artifact_bytes_per_day`: **300 MiB a day**. Samples
+go when their claim reaches 180 days, or 90 days after the family is closed, so
+a sustained flood fills the 10 GB in about **five weeks**.
+
+**Recommendation (not applied — this is a maintainer decision).** The defaults
+above are the ones the design asked for, and they are what this Worker ships.
+If the VPK is published widely and nobody is watching the dashboard daily, the
+safer set is:
+
+| Setting | Default | Safer | Why |
+|---|---|---|---|
+| `global_claims_per_day` | 2 000 | 500 | 180 days of flood becomes 0.11 to 0.22 GB instead of 0.45 to 0.88 |
+| `global_new_signatures_per_day` | 200 | 50 | new families are the expensive claims, and 50 a day is already more bugs than a person can read |
+| `global_artifact_bytes_per_day` | 300 MiB | 50 MiB | 10 GB of R2 then takes seven months of flood, not five weeks |
+| claim retention (`RETENTION.reportDays` in `src/cron.ts`) | 180 days | 90 days | halves the steady state; the aggregate counters of a family are kept anyway |
+
+The first three are one call away and take effect at once:
+
+```sh
+curl -X PUT "$API/v1/admin/settings" -H "authorization: Bearer $ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"caps":{"global_claims_per_day":500,"global_new_signatures_per_day":50,"global_artifact_bytes_per_day":52428800}}'
+```
+
+**Watching it.** The daily cron logs the database size (`database_bytes` in its
+summary, `npx wrangler tail`), R2 is on the Cloudflare dashboard, and
+`GET /v1/admin/stats` gives the day's use of every global cap. If the database
+does climb: lower `global_claims_per_day`, switch claims off
+(`{"accepting":false}`, which answers 503 with `disable_until_unix`), shorten
+retention, or move to D1 paid (10 GB).
 
 ## Configuration
 
