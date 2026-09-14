@@ -47,6 +47,9 @@ class ArtifactCapsTest(SchemaTestCase):
             with self.subTest(name=name):
                 self.assertValid({"name": name, "max_bytes": cap}, "ArtifactRequest")
                 self.assertInvalidAt({"name": name, "max_bytes": cap + 1}, "/max_bytes", "ArtifactRequest")
+                stored = {"v": 1, "report_id": "01J9Z6T4Q8M3K7V2B5N0XWAYCD", "name": name, "bytes": cap}
+                self.assertValid(stored, "ArtifactStored")
+                self.assertInvalidAt(dict(stored, bytes=cap + 1), "/bytes", "ArtifactStored")
 
     def test_vectors_sit_on_both_sides_of_every_cap(self):
         # Implementations (ajv in the API) must see a claim offering exactly the
