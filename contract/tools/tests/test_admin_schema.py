@@ -218,19 +218,37 @@ class ErrorBodyTest(SchemaTestCase):
 
     def test_error_codes(self):
         for code in ("invalid_payload", "unauthorized", "unknown_build", "bad_token", "turnstile",
-                     "not_found", "method_not_allowed", "exists", "incomplete", "payload_too_large",
-                     "internal_error"):
+                     "not_found", "method_not_allowed", "payload_too_large", "internal_error"):
             with self.subTest(code=code):
                 self.assertValid({"v": 1, "error": code, "message": "details"})
         self.assertInvalidAt({"v": 1, "error": "rate-limited", "message": ""}, "/error")
-        self.assertInvalidAt({"v": 1, "error": "exists"}, "")
-        self.assertInvalidAt({"v": 1, "error": "exists", "message": "m", "detail": "x"}, "")
+        self.assertInvalidAt({"v": 1, "error": "bad_token"}, "")
+        self.assertInvalidAt({"v": 1, "error": "bad_token", "message": "m", "detail": "x"}, "")
 
     def test_rate_limited_requires_retry_after(self):
         self.assertValid({"v": 1, "error": "rate_limited", "message": "m", "retry_after_s": 3600})
         self.assertInvalidAt({"v": 1, "error": "rate_limited", "message": "m"}, "")
         self.assertInvalidAt({"v": 1, "error": "rate_limited", "message": "m", "retry_after_s": None},
                              "/retry_after_s")
+
+    def test_request_identifiers(self):
+        report_id = "01J9Z6T4Q8M3K7V2B5N0XWAYCD"
+        self.assertValid({"v": 1, "error": "bad_token", "message": "m", "report_id": report_id})
+        self.assertValid({"v": 1, "error": "payload_too_large", "message": "m", "report_id": report_id,
+                          "artifact": "dump"})
+        self.assertValid({"v": 1, "error": "rate_limited", "message": "m", "retry_after_s": 60,
+                          "report_id": report_id})
+        self.assertInvalidAt({"v": 1, "error": "bad_token", "message": "m", "report_id": "x"}, "/report_id")
+        self.assertInvalidAt({"v": 1, "error": "bad_token", "message": "m", "report_id": report_id,
+                              "artifact": "minidump"}, "/artifact")
+
+    def test_exists_and_incomplete_name_their_report(self):
+        report_id = "01J9Z6T4Q8M3K7V2B5N0XWAYCD"
+        self.assertValid({"v": 1, "error": "exists", "message": "m", "report_id": report_id, "artifact": "crash_txt"})
+        self.assertInvalidAt({"v": 1, "error": "exists", "message": "m", "report_id": report_id}, "")
+        self.assertInvalidAt({"v": 1, "error": "exists", "message": "m", "artifact": "crash_txt"}, "")
+        self.assertValid({"v": 1, "error": "incomplete", "message": "m", "report_id": report_id})
+        self.assertInvalidAt({"v": 1, "error": "incomplete", "message": "m"}, "")
 
     def test_not_accepting_requires_disable_until(self):
         self.assertValid({"v": 1, "error": "not_accepting", "message": "m", "disable_until_unix": 1789300000})

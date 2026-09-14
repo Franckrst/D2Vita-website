@@ -85,6 +85,7 @@ class ResponseSignatureVectorsTest(unittest.TestCase):
         "decision_count_only": ("decision.v1", None),
         "error_rate_limited": ("admin.v1", "ErrorBody"),
         "error_not_accepting": ("admin.v1", "ErrorBody"),
+        "error_exists": ("admin.v1", "ErrorBody"),
         "artifact_stored": ("decision.v1", "ArtifactStored"),
         "complete_response": ("decision.v1", "CompleteResponse"),
         "error_non_ascii_message": ("admin.v1", "ErrorBody"),
@@ -115,6 +116,15 @@ class ResponseSignatureVectorsTest(unittest.TestCase):
             with self.subTest(case=name):
                 body = json.loads(by_name[name]["body_utf8"])
                 self.assertEqual([], [e.message for e in check_schemas.schema_errors(schema, body, definition)])
+
+    def test_report_bodies_name_their_report(self):
+        by_name = {case["name"]: json.loads(case["body_utf8"]) for case in self.document["cases"] if case["body_utf8"]}
+        report_id = by_name["decision_upload"]["report_id"]
+        for name in ("decision_count_only", "artifact_stored", "complete_response", "error_exists"):
+            with self.subTest(case=name):
+                self.assertEqual(report_id, by_name[name]["report_id"])
+        self.assertEqual("crash_txt", by_name["artifact_stored"]["name"])
+        self.assertEqual("crash_txt", by_name["error_exists"]["artifact"])
 
     def test_negative_cases_are_rejected(self):
         negatives = self.document["negative_cases"]

@@ -401,7 +401,7 @@
       }
     },
     "ErrorBody": {
-      "description": "Body of every 4xx/5xx response. Responses to console endpoints are signed like the others. See contract/README.md for the status of each code.",
+      "description": "Body of every 4xx/5xx response. Responses to console endpoints are signed like the others. report_id and artifact name the request an error answers (always present for exists and incomplete); see contract/README.md for when the Worker sets them and for the status of each code.",
       "type": "object",
       "additionalProperties": false,
       "required": ["v", "error", "message"],
@@ -426,9 +426,30 @@
         },
         "message": { "type": "string", "maxLength": 500 },
         "retry_after_s": { "$ref": "claim.v1.schema.json#/$defs/U32" },
-        "disable_until_unix": { "$ref": "claim.v1.schema.json#/$defs/U32" }
+        "disable_until_unix": { "$ref": "claim.v1.schema.json#/$defs/U32" },
+        "report_id": { "$ref": "claim.v1.schema.json#/$defs/ReportId" },
+        "artifact": { "$ref": "claim.v1.schema.json#/$defs/ArtifactName" }
       },
       "allOf": [
+        {
+          "if": { "type": "object", "required": ["error"], "properties": { "error": { "const": "exists" } } },
+          "then": {
+            "type": "object",
+            "required": ["report_id", "artifact"],
+            "properties": {
+              "report_id": { "$ref": "claim.v1.schema.json#/$defs/ReportId" },
+              "artifact": { "$ref": "claim.v1.schema.json#/$defs/ArtifactName" }
+            }
+          }
+        },
+        {
+          "if": { "type": "object", "required": ["error"], "properties": { "error": { "const": "incomplete" } } },
+          "then": {
+            "type": "object",
+            "required": ["report_id"],
+            "properties": { "report_id": { "$ref": "claim.v1.schema.json#/$defs/ReportId" } }
+          }
+        },
         {
           "if": { "type": "object", "required": ["error"], "properties": { "error": { "const": "rate_limited" } } },
           "then": {

@@ -77,12 +77,13 @@
       "allOf": [{ "$ref": "claim.v1.schema.json#/$defs/ArtifactSizeCaps" }]
     },
     "ArtifactStored": {
-      "description": "Body of the 201 response to PUT /v1/reports/{report_id}/artifacts/{name}. bytes is the stored sealed size.",
+      "description": "Body of the 201 response to PUT /v1/reports/{report_id}/artifacts/{name}. report_id and name are those of the path, bytes is the stored sealed size. A signed body can be replayed, so it names the request it answers (contract/README.md, response signatures).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["v", "name", "bytes"],
+      "required": ["v", "report_id", "name", "bytes"],
       "properties": {
         "v": { "const": 1 },
+        "report_id": { "$ref": "claim.v1.schema.json#/$defs/ReportId" },
         "name": { "$ref": "claim.v1.schema.json#/$defs/ArtifactName" },
         "bytes": { "type": "integer", "minimum": 88 }
       },
@@ -105,12 +106,13 @@
       }
     },
     "CompleteResponse": {
-      "description": "Body of the 200 response to POST /v1/reports/{report_id}/complete.",
+      "description": "Body of the 200 response to POST /v1/reports/{report_id}/complete. report_id is the one of the path, so a replayed body cannot complete another report.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["v", "sample_stored"],
+      "required": ["v", "report_id", "sample_stored"],
       "properties": {
         "v": { "const": 1 },
+        "report_id": { "$ref": "claim.v1.schema.json#/$defs/ReportId" },
         "sample_stored": { "type": "boolean" }
       }
     }

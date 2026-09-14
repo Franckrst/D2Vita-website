@@ -107,9 +107,14 @@ class ConsoleUploadMessagesTest(SchemaTestCase):
     schema_name = "decision.v1"
 
     def test_artifact_stored(self):
-        self.assertValid({"v": 1, "name": "crash_txt", "bytes": 2210}, "ArtifactStored")
-        self.assertInvalidAt({"v": 1, "name": "crash_txt", "bytes": 70000}, "/bytes", "ArtifactStored")
-        self.assertInvalidAt({"v": 1, "name": "crash_txt"}, "", "ArtifactStored")
+        stored = {"v": 1, "report_id": "01J9Z6T4Q8M3K7V2B5N0XWAYCD", "name": "crash_txt", "bytes": 2210}
+        self.assertValid(stored, "ArtifactStored")
+        self.assertInvalidAt(mutated(stored, lambda s: s.update(bytes=70000)), "/bytes", "ArtifactStored")
+        self.assertInvalidAt(mutated(stored, lambda s: s.update(report_id="nope")), "/report_id", "ArtifactStored")
+        for key in ("v", "report_id", "name", "bytes"):
+            with self.subTest(key=key):
+                # A signed body can be replayed: it must name the request it answers.
+                self.assertInvalidAt(mutated(stored, lambda s: s.pop(key)), "", "ArtifactStored")
 
     def test_complete_request(self):
         self.assertValid({"v": 1, "artifacts": ["crash_txt", "crash_log"]}, "CompleteRequest")
@@ -120,7 +125,11 @@ class ConsoleUploadMessagesTest(SchemaTestCase):
         self.assertInvalidAt({"v": 1, "artifacts": ["dump"], "report_id": "x"}, "", "CompleteRequest")
 
     def test_complete_response(self):
-        self.assertValid({"v": 1, "sample_stored": True}, "CompleteResponse")
-        self.assertValid({"v": 1, "sample_stored": False}, "CompleteResponse")
-        self.assertInvalidAt({"v": 1, "sample_stored": "yes"}, "/sample_stored", "CompleteResponse")
-        self.assertInvalidAt({"sample_stored": True}, "", "CompleteResponse")
+        response = {"v": 1, "report_id": "01J9Z6T4Q8M3K7V2B5N0XWAYCD", "sample_stored": True}
+        self.assertValid(response, "CompleteResponse")
+        self.assertValid(dict(response, sample_stored=False), "CompleteResponse")
+        self.assertInvalidAt(dict(response, sample_stored="yes"), "/sample_stored", "CompleteResponse")
+        self.assertInvalidAt(dict(response, report_id="01j9z6t4q8m3k7v2b5n0xwaycd"), "/report_id", "CompleteResponse")
+        self.assertInvalidAt({"v": 1, "sample_stored": True}, "", "CompleteResponse")
+        self.assertInvalidAt({"report_id": "01J9Z6T4Q8M3K7V2B5N0XWAYCD", "sample_stored": True}, "",
+                             "CompleteResponse")

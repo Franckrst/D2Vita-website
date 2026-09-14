@@ -55,6 +55,24 @@ class ReadmeTest(unittest.TestCase):
                 if definition:
                     self.assertIn(definition, schemas[schema]["$defs"])
 
+    def test_response_binding_table(self):
+        block = re.search(r"<!-- response-binding:begin -->(.*?)<!-- response-binding:end -->", self.text, re.S)
+        self.assertIsNotNone(block, "response binding table not found")
+        rows = re.findall(r"^\| `((?:decision|admin)\.v1)(?:#([A-Za-z]+))?` \| (.*) \|$", block.group(1), re.M)
+        schemas = check_schemas.load_schemas()
+        bodies = {(schema, definition or None) for schema, definition, _ in rows}
+        self.assertEqual({("decision.v1", None), ("decision.v1", "ArtifactStored"),
+                          ("decision.v1", "CompleteResponse"), ("admin.v1", "ErrorBody")}, bodies)
+        for schema, definition, checks in rows:
+            body = schemas[schema]["$defs"][definition] if definition else schemas[schema]
+            fields = re.findall(r"`([a-z_]+)`", checks)
+            with self.subTest(body=f"{schema}#{definition}"):
+                self.assertIn("report_id", fields)
+                for field in fields:
+                    self.assertIn(field, body["properties"])
+                    if definition != "ErrorBody":  # success bodies always carry what the console checks
+                        self.assertIn(field, body["required"])
+
     def test_artifact_caps_table(self):
         block = re.search(r"<!-- artifact-caps:begin -->(.*?)<!-- artifact-caps:end -->", self.text, re.S)
         self.assertIsNotNone(block, "artifact caps table not found")

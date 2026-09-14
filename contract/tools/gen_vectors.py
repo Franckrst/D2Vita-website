@@ -757,8 +757,13 @@ RESPONSE_BODIES = (
     ("error_not_accepting", SIGNING_SEED_A, compact({
         "v": 1, "error": "not_accepting", "message": "crash reports are paused",
         "disable_until_unix": 1789372800})),
-    ("artifact_stored", SIGNING_SEED_A, compact({"v": 1, "name": "crash_txt", "bytes": 2210})),
-    ("complete_response", SIGNING_SEED_A, compact({"v": 1, "sample_stored": True})),
+    ("error_exists", SIGNING_SEED_A, compact({
+        "v": 1, "error": "exists", "message": "artifact already stored",
+        "report_id": "01J9Z6T4Q8M3K7V2B5N0XWAYCD", "artifact": "crash_txt"})),
+    ("artifact_stored", SIGNING_SEED_A, compact({
+        "v": 1, "report_id": "01J9Z6T4Q8M3K7V2B5N0XWAYCD", "name": "crash_txt", "bytes": 2210})),
+    ("complete_response", SIGNING_SEED_A, compact({
+        "v": 1, "report_id": "01J9Z6T4Q8M3K7V2B5N0XWAYCD", "sample_stored": True})),
     ("error_non_ascii_message", SIGNING_SEED_B, compact({
         "v": 1, "error": "invalid_payload", "message": "champ inconnu \xab caf\xe9 \xbb \U0001F525"})),
     ("empty_body", SIGNING_SEED_B, ""),

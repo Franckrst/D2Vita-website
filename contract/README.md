@@ -141,6 +141,38 @@ uses the upload token there too.
 - Vectors: `vectors/response-sig.v1.json`, including a non-BMP body, an empty
   body and five signatures that must be rejected (among them `S + L`).
 
+A valid signature proves that the Worker wrote the body, not that the body
+answers this request: anyone can obtain signed bodies from their own client,
+and an on-path attacker can replay them. So every body that concerns one
+report names it, and the console checks what the body names against its own
+request:
+
+<!-- response-binding:begin -->
+| Body | The console checks |
+|---|---|
+| `decision.v1` | `report_id` equals the `report_id` of the claim |
+| `decision.v1#ArtifactStored` | `report_id` and `name` equal those of the PUT path, `bytes` equals the `Content-Length` sent |
+| `decision.v1#CompleteResponse` | `report_id` equals the one of the path |
+| `admin.v1#ErrorBody` | `report_id` and `artifact`, when present, equal those of the request |
+<!-- response-binding:end -->
+
+- A verified body that names another request is handled like a network
+  failure.
+- The Worker sets `report_id` in every error of `PUT .../artifacts/{name}`
+  (with `artifact`) and of `POST .../complete` whose path parameters are
+  valid, and in the errors of `POST /v1/claims` that it returns after the
+  claim was parsed with a valid `report_id`. The schema requires them for
+  `exists` and `incomplete`.
+- The console deletes a pending report only after a verified body that names
+  it: a decision with `action: count_only`, or a `CompleteResponse`.
+- `429 rate_limited` and `503 not_accepting` are honoured even without
+  `report_id`: the daily caps and the kill switch are not per report, and the
+  Worker may answer them before reading the claim. Their effect cannot outlast
+  what the Worker signed (`disable_until_unix` is absolute).
+- Status codes are not signed. The console reads a body with the schema that
+  its status announces (a 2xx success body, otherwise `ErrorBody`) and treats
+  a body that does not match like a network failure.
+
 ## Error codes
 
 `error` of `admin.v1#ErrorBody`. `rate_limited` requires `retry_after_s`;
@@ -239,6 +271,11 @@ d2-vita) leaves these points open; v1 settles them as follows.
     marked `withheld` (section 4.5). The other artifacts are not tied to a
     kind: the "sent for" column of section 4.5 is applied by the API when it
     chooses what to request.
+17. Signed bodies about one report name it (`ArtifactStored` and
+    `CompleteResponse` carry `report_id`; `ErrorBody` may carry `report_id`
+    and `artifact`), and the console checks them against its request. The
+    signature itself stays over the body alone, as section 5.2 says, instead
+    of also covering the method, path and status.
 
 ## Monocypher
 
