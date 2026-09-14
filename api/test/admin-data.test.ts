@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { sha256, toHex } from "../src/crypto";
+import { RULES_VERSION } from "../src/signature";
 import { admin, adminRequest, sendClaim } from "./admin-helpers";
 import { haltClaim, ulid } from "./fixtures";
 import { NOW, call, registerBuild, resetDatabase, storeSample } from "./helpers";
@@ -31,6 +32,21 @@ describe("GET /v1/admin/reports/{id}", () => {
       claim,
       artifacts: [],
     });
+  });
+
+  it("reports the rules version the signature was computed under", async () => {
+    // Design section 5.3 versions the rules so that history can be
+    // reclassified: a report keeps the version of the day it arrived, and a
+    // later bump of RULES_VERSION must not rewrite what old reports claim.
+    const claim = haltClaim();
+    await sendClaim(claim);
+    expect(
+      await env.DB.prepare("SELECT rules_version FROM reports WHERE report_id = ?1").bind(claim.report_id).first(),
+    ).toEqual({ rules_version: RULES_VERSION });
+
+    await env.DB.prepare("UPDATE reports SET rules_version = 2 WHERE report_id = ?1").bind(claim.report_id).run();
+    const res = await admin("GET", `/v1/admin/reports/${claim.report_id}`);
+    expect(res.body.rules_version).toBe(2);
   });
 
   it("lists the stored pieces of a completed report", async () => {

@@ -238,11 +238,24 @@ async function ingest(
     db
       .prepare(
         `INSERT INTO reports (report_id, ingest_nonce, signature, raw_signature, install_hash, build_id, channel,
-                              kind, received_at, claim, decision, action)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'count_only')
+                              kind, received_at, claim, decision, action, rules_version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'count_only', ?12)
          ON CONFLICT (report_id) DO NOTHING`,
       )
-      .bind(claim.report_id, nonce, sig, rawId, install, claim.build_id, build.channel, claim.kind, now, JSON.stringify(claim), countOnly),
+      .bind(
+        claim.report_id,
+        nonce,
+        sig,
+        rawId,
+        install,
+        claim.build_id,
+        build.channel,
+        claim.kind,
+        now,
+        JSON.stringify(claim),
+        countOnly,
+        RULES_VERSION,
+      ),
   );
 
   const regressionIndex = statements.length;

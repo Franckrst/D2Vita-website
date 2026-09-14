@@ -7,7 +7,6 @@ import { requireSecret, type Env } from "./env";
 import { error, json, readBoundedJson } from "./http";
 import { SCOPE, loadSettings, saveSettings, utcDay, type Settings } from "./limits";
 import { StatementBudget, purgePieces } from "./maintenance";
-import { RULES_VERSION } from "./signature";
 import { ARTIFACT_NAMES, KINDS, type ArtifactName } from "./types";
 import { artifactKey } from "./uploads";
 import {
@@ -333,7 +332,9 @@ export async function getReport(
     signature: row.signature,
     install_hash: row.install_hash,
     received_unix: row.received_at,
-    rules_version: RULES_VERSION,
+    // The version the signature of THIS report was computed under, not the
+    // version this build of the Worker uses (design section 5.3).
+    rules_version: row.rules_version,
     action: row.action,
     completed_unix: row.completed_at,
     claim: JSON.parse(row.claim as string),

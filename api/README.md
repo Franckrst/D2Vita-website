@@ -235,6 +235,11 @@ the length of the sample lease).
   pseudonym `install_hash = HMAC(INSTALL_HASH_KEY, install_id)`: counters,
   distinct-console counts, links and erasure. Claims are deleted after 180
   days.
+- Every report keeps the `rules_version` its signature was computed under
+  (`reports.rules_version`, migration `0002`), and `admin.v1#ReportDetail`
+  returns that column, not the version the running Worker uses. Design section
+  5.3 versions the rules so that history can be reclassified knowingly: a bump
+  of `RULES_VERSION` must not rewrite what older reports say.
 - Rate limits use the channel of the **registered** build, not the one claimed.
   Counters are consumed most specific first and stop at the first refusal.
 - `503` without an end date set by the admin answers `disable_until_unix = now + 24 h`.
