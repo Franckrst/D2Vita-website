@@ -460,9 +460,17 @@ export async function deleteInstall(
   const ofInstall = "SELECT report_id FROM reports WHERE install_hash = ?1";
 
   await db.batch([
+    // A stored sample and a lease can belong to different installations (after
+    // a resample): only what belongs to this one is cleared.
     db.prepare(
-      `UPDATE signatures SET sample_state = 'none', sample_report = NULL, lease_report = NULL, lease_expires = NULL
-       WHERE sample_report IN (${ofInstall}) OR lease_report IN (${ofInstall})`,
+      `UPDATE signatures SET sample_report = NULL,
+              sample_state = CASE WHEN sample_state = 'stored' THEN 'none' ELSE sample_state END
+       WHERE sample_report IN (${ofInstall})`,
+    ).bind(hash),
+    db.prepare(
+      `UPDATE signatures SET lease_report = NULL, lease_expires = NULL,
+              sample_state = CASE WHEN sample_state = 'leased' THEN 'none' ELSE sample_state END
+       WHERE lease_report IN (${ofInstall})`,
     ).bind(hash),
     db.prepare(
       "UPDATE signatures SET installs = MAX(installs - 1, 0) WHERE id IN (SELECT signature FROM signature_installs WHERE install_hash = ?1)",

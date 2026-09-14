@@ -8,6 +8,7 @@ import {
   bytesOf,
   call,
   claimRequest,
+  completeRequest,
   putRequest,
   registerBuild,
   resetDatabase,
@@ -84,6 +85,49 @@ describe("DELETE /v1/admin/installs/{install_id}", () => {
     expect(counters).toEqual({ n: 0 });
 
     // A new crash of the same family asks for a fresh sample.
+    expect((await sendClaim(haltClaim())).action).toBe("upload");
+  });
+
+  it("keeps the lease another installation holds after a resample", async () => {
+    await registerBuild();
+    const x = installId();
+    const y = installId();
+    const { decision: sample } = await storeSample(haltClaim({ install_id: x }));
+    const sig = sample.signature as string;
+    expect((await admin("PATCH", `/v1/admin/signatures/${sig}`, { resample: true })).status).toBe(200);
+    const leased = await sendClaim(haltClaim({ install_id: y }));
+    expect(leased.action).toBe("upload");
+
+    expect((await admin("DELETE", `/v1/admin/installs/${x}`)).status).toBe(200);
+    expect(await signatureRow(sig)).toMatchObject({ sample_state: "leased", lease_report: leased.report_id, sample_report: null });
+
+    // Y still stores the fresh sample.
+    const names = (leased.upload.artifacts as Array<{ name: string }>).map((a) => a.name);
+    for (const name of names) {
+      expect((await call(putRequest(leased.report_id, name, bytesOf(100), leased.upload.token))).status).toBe(201);
+    }
+    const done = await call(completeRequest(leased.report_id, leased.upload.token, { v: 1, artifacts: names }));
+    expect(await signedJson(done)).toMatchObject({ sample_stored: true });
+    expect(await signatureRow(sig)).toMatchObject({ sample_state: "stored", sample_report: leased.report_id });
+  });
+
+  it("keeps another installation's stored sample when the erased one held the lease", async () => {
+    await registerBuild();
+    const x = installId();
+    const y = installId();
+    const { decision: sample } = await storeSample(haltClaim({ install_id: y }));
+    const sig = sample.signature as string;
+    await admin("PATCH", `/v1/admin/signatures/${sig}`, { resample: true });
+    expect((await sendClaim(haltClaim({ install_id: x }))).action).toBe("upload");
+
+    expect((await admin("DELETE", `/v1/admin/installs/${x}`)).status).toBe(200);
+    expect(await signatureRow(sig)).toMatchObject({
+      sample_state: "none",
+      lease_report: null,
+      lease_expires: null,
+      sample_report: sample.report_id,
+    });
+    // The next crash of the family is asked for the sample again.
     expect((await sendClaim(haltClaim())).action).toBe("upload");
   });
 
