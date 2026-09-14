@@ -116,6 +116,16 @@ describe("POST /v1/bugs", () => {
     expect((await call(bugRequest(bugBody(), { "cf-connecting-ip": "203.0.113.6" }))).status).toBe(201);
   });
 
+  it("counts IPv6 bug reports per /64", async () => {
+    mockTurnstile({ success: true });
+    for (let i = 1; i <= 3; i++) {
+      expect((await call(bugRequest(bugBody(), { "cf-connecting-ip": `2001:db8:77:1::${i}` }))).status).toBe(201);
+    }
+    expect((await call(bugRequest(bugBody(), { "cf-connecting-ip": "2001:db8:77:1:ffff::4" }))).status).toBe(429);
+    // Home ISPs pack many customers into one /48: another /64 is another source.
+    expect((await call(bugRequest(bugBody(), { "cf-connecting-ip": "2001:db8:77:2::1" }))).status).toBe(201);
+  });
+
   it("applies the global daily bug cap", async () => {
     mockTurnstile({ success: true });
     await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cap:global_bugs', '2')").run();

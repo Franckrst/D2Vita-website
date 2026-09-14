@@ -63,6 +63,28 @@ describe("claim rate limits (spec section 5.5)", () => {
     expect(await signedJson(refused)).toMatchObject({ error: "rate_limited" });
   });
 
+  it("counts IPv6 claims per /48, so addresses of one allocation share the per-IP cap", async () => {
+    // Ten addresses of one /64: the 11th address of that /64 is refused.
+    for (let i = 1; i <= 10; i++) {
+      expect((await call(claimRequest(haltClaim(), { ip: `2001:db8:1234:5678::${i.toString(16)}` }))).status).toBe(200);
+    }
+    const sameSlash64 = await call(claimRequest(haltClaim(), { ip: "2001:db8:1234:5678:ffff:ffff:ffff:ffff" }));
+    expect(sameSlash64.status).toBe(429);
+    expect(await signedJson(sameSlash64)).toMatchObject({ error: "rate_limited" });
+    // Another /64 of the same /48 (what a free tunnel broker hands out) too.
+    expect((await call(claimRequest(haltClaim(), { ip: "2001:db8:1234:9::1" }))).status).toBe(429);
+    // Another /48 is a different source.
+    expect((await call(claimRequest(haltClaim(), { ip: "2001:db8:1235::1" }))).status).toBe(200);
+  });
+
+  it("counts an IPv4-mapped IPv6 address with its IPv4 address", async () => {
+    for (let i = 0; i < 5; i++) {
+      expect((await call(claimRequest(haltClaim(), { ip: "198.51.100.7" }))).status).toBe(200);
+      expect((await call(claimRequest(haltClaim(), { ip: "::ffff:198.51.100.7" }))).status).toBe(200);
+    }
+    expect((await call(claimRequest(haltClaim(), { ip: "::ffff:c633:6407" }))).status).toBe(429);
+  });
+
   it("applies the global daily claim cap", async () => {
     await setCap("global_claims", 2);
     expect((await call(claimRequest(haltClaim()))).status).toBe(200);

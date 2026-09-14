@@ -4,7 +4,7 @@
 import { base32 } from "./crypto";
 import { requireSecret, type Env } from "./env";
 import { allowedOrigin, error, json, readBoundedJson, withCors } from "./http";
-import { SCOPE, consumeAll, ipHash, loadSettings, rateLimited, utcDay } from "./limits";
+import { SCOPE, consumeAll, ipHash, loadSettings, networkKey, rateLimited, utcDay } from "./limits";
 import { validateBug } from "./validate";
 
 export const SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -61,7 +61,7 @@ async function createBug(request: Request, env: Env, now: number): Promise<Respo
 
   const settings = await loadSettings(env.DB);
   const day = utcDay(now);
-  const ipSubject = await ipHash(env, env.DB, ip ?? "unknown", day, settings.salts);
+  const ipSubject = await ipHash(env, env.DB, networkKey(ip, 64), day, settings.salts);
   const refused = await consumeAll(env.DB, day, [
     { scope: SCOPE.ipBugs, subject: ipSubject, amount: 1, cap: settings.caps.ip_bugs },
     { scope: SCOPE.globalBugs, subject: "*", amount: 1, cap: settings.caps.global_bugs },

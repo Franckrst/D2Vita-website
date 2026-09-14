@@ -7,6 +7,7 @@ import {
   installCaps,
   ipHash,
   loadSettings,
+  networkKey,
   rateLimited,
   saveSettings,
   secondsUntilNextUtcDay,
@@ -133,6 +134,43 @@ describe("settings", () => {
       expect(caps.bytes).toBe(DEFAULT_CAPS.install_artifact_bytes_dev);
       expect(caps.claims).toBeGreaterThan(3);
       expect(caps.bytes).toBeGreaterThan(3 * MiB);
+    }
+  });
+});
+
+describe("network keys for the per-IP caps", () => {
+  it("keeps IPv4 addresses and counts IPv4-mapped IPv6 as its IPv4 address", () => {
+    for (const prefix of [48, 64] as const) {
+      expect(networkKey("203.0.113.7", prefix)).toBe("203.0.113.7");
+      expect(networkKey("::ffff:203.0.113.7", prefix)).toBe("203.0.113.7");
+      expect(networkKey("::FFFF:cb00:7107", prefix)).toBe("203.0.113.7");
+      expect(networkKey("0:0:0:0:0:ffff:203.0.113.7", prefix)).toBe("203.0.113.7");
+    }
+  });
+
+  it("reduces IPv6 to its /48 or /64 prefix, whatever the spelling", () => {
+    for (const spelling of [
+      "2001:db8:1234:5678::1",
+      "2001:0DB8:1234:5678:0000:0000:0000:0001",
+      "2001:db8:1234:5678:0:0:0:1%eth0",
+      "2001:db8:1234:5678::0.0.0.1",
+    ]) {
+      expect(networkKey(spelling, 64)).toBe("2001:db8:1234:5678::/64");
+      expect(networkKey(spelling, 48)).toBe("2001:db8:1234::/48");
+    }
+    expect(networkKey("2001:db8:1234:ffff:abcd::9", 64)).toBe("2001:db8:1234:ffff::/64");
+    expect(networkKey("2001:db8:1234:ffff:abcd::9", 48)).toBe("2001:db8:1234::/48");
+    expect(networkKey("2001:db8::", 48)).toBe("2001:db8:0::/48");
+    expect(networkKey("::", 64)).toBe("0:0:0:0::/64");
+  });
+
+  it("never throws on a missing or malformed address", () => {
+    expect(networkKey(null, 48)).toBe("unknown");
+    expect(networkKey("", 64)).toBe("unknown");
+    for (const bad of ["1.2.3", "300.1.1.1", "1::2::3", "2001:db8:::1", "zzzz::", "1:2:3:4:5:6:7:8:9", ":1:2:3:4:5:6:7", "1.2.3.4::"]) {
+      const key = networkKey(bad, 48);
+      expect(key, bad).toMatch(/^other:/);
+      expect(networkKey(bad, 64), bad).toBe(key);
     }
   });
 });

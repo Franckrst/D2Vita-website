@@ -160,9 +160,16 @@ the length of the sample lease).
   Counters are consumed most specific first and stop at the first refusal.
 - `503` without an end date set by the admin answers `disable_until_unix = now + 24 h`.
 - A replay with the same `report_id` from another installation is a 400.
-- IP pseudonym: `HMAC(HMAC(INSTALL_HASH_KEY, day|salt), ip)` with a random salt
-  per UTC day stored in `settings`; the cron deletes salts and counters from two
-  days ago, after which old hashes cannot be linked to an address.
+- IP pseudonym: `HMAC(HMAC(INSTALL_HASH_KEY, day|salt), network)` with a random
+  salt per UTC day stored in `settings`; the cron deletes salts and counters from
+  two days ago, after which old hashes cannot be linked to an address.
+- What "one IP" means for the per-IP caps: an IPv4 address (IPv4-mapped IPv6
+  counts as its IPv4 address); for IPv6, a **/48** on claims and a **/64** on bug
+  reports. One IPv6 host controls a whole prefix (a VPS gets a /64, a free
+  tunnel broker a /48), so counting full addresses would let one machine use
+  the whole global budget. The console network stack is IPv4-only (VitaSDK has
+  no `AF_INET6`), so no player shares a /48 claim counter; browsers on home
+  IPv6 do share /48s with other customers of their ISP, hence /64 for bugs.
 
 ### Limits (defaults, adjustable with `PUT /v1/admin/settings`)
 
@@ -170,7 +177,7 @@ the length of the sample lease).
 |---|---|
 | `install_claims` / `install_artifact_bytes` | 3 / 3 MiB per day |
 | `install_claims_dev` / `install_artifact_bytes_dev` (dev/test builds) | 50 / 64 MiB per day |
-| `ip_claims` / `ip_bugs` | 10 / 3 per day |
+| `ip_claims` / `ip_bugs` | 10 / 3 per day, per IPv4 address or IPv6 /48 (claims) or /64 (bugs) |
 | `global_claims` / `global_artifact_bytes` | 2000 / 300 MiB per day |
 | `global_new_signatures` / `global_bugs` | 200 / 100 per day |
 

@@ -143,6 +143,77 @@ export async function saveSettings(db: D1Database, patch: SettingsPatch): Promis
 }
 
 // ---------------------------------------------------------------------------
+// Network keys for the per-IP caps. CF-Connecting-IP is a single address, but
+// an IPv6 host controls a whole prefix (a VPS gets a /64, a free tunnel broker
+// a /48), so counting full addresses would let one machine bypass the caps.
+// IPv4 addresses, and IPv4-mapped IPv6, are counted as they are. IPv6 is
+// counted per prefix:
+//  - /48 for claims: the console network stack is IPv4-only (VitaSDK has no
+//    AF_INET6), so real players never share a /48 counter;
+//  - /64 for bug reports: browsers on home IPv6, where an ISP packs many
+//    customers into one /48.
+
+export type Ipv6Prefix = 48 | 64;
+
+export function networkKey(ip: string | null, v6Prefix: Ipv6Prefix): string {
+  if (!ip) return "unknown";
+  const v4 = parseIpv4(ip);
+  if (v4) return v4.join(".");
+  const groups = parseIpv6(ip);
+  if (!groups) return `other:${ip.slice(0, 64).toLowerCase()}`;
+  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
+    const [hi, lo] = [groups[6]!, groups[7]!];
+    return [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff].join(".");
+  }
+  return `${groups
+    .slice(0, v6Prefix / 16)
+    .map((g) => g.toString(16))
+    .join(":")}::/${v6Prefix}`;
+}
+
+function parseIpv4(text: string): number[] | null {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text);
+  if (!match) return null;
+  const octets = match.slice(1).map(Number);
+  return octets.every((o) => o <= 255) ? octets : null;
+}
+
+// The eight 16-bit groups of an IPv6 address, or null. Accepts "::"
+// compression, a dotted IPv4 tail and a zone suffix ("%eth0").
+function parseIpv6(text: string): number[] | null {
+  const address = text.split("%", 1)[0]!.toLowerCase();
+  if (!/^[0-9a-f:.]{2,45}$/.test(address)) return null;
+  const halves = address.split("::");
+  if (halves.length > 2) return null;
+  const groups = (part: string, dottedTail: boolean): number[] | null => {
+    if (part === "") return [];
+    const items = part.split(":");
+    const out: number[] = [];
+    for (const [i, item] of items.entries()) {
+      if (dottedTail && i === items.length - 1 && item.includes(".")) {
+        const v4 = parseIpv4(item);
+        if (!v4) return null;
+        out.push((v4[0]! << 8) | v4[1]!, (v4[2]! << 8) | v4[3]!);
+      } else if (/^[0-9a-f]{1,4}$/.test(item)) {
+        out.push(parseInt(item, 16));
+      } else {
+        return null;
+      }
+    }
+    return out;
+  };
+  if (halves.length === 1) {
+    const all = groups(address, true);
+    return all?.length === 8 ? all : null;
+  }
+  const head = groups(halves[0]!, false);
+  const tail = groups(halves[1]!, true);
+  if (!head || !tail) return null;
+  const zeros = 8 - head.length - tail.length;
+  return zeros >= 1 ? [...head, ...new Array<number>(zeros).fill(0), ...tail] : null;
+}
+
+// ---------------------------------------------------------------------------
 // IP pseudonyms: HMAC with a random salt of the day. The salt is deleted by
 // the cron two days later, after which old hashes can no longer be linked to
 // an address, even with the Worker secret.
@@ -159,15 +230,16 @@ async function dailySalt(db: D1Database, day: string): Promise<string> {
   return value;
 }
 
+// Pseudonym of a network key (see networkKey) for the given UTC day.
 export async function ipHash(
   env: { INSTALL_HASH_KEY?: string },
   db: D1Database,
-  ip: string,
+  network: string,
   day: string,
   knownSalts?: Map<string, string>,
 ): Promise<string> {
   const secret = requireSecret(env.INSTALL_HASH_KEY, "INSTALL_HASH_KEY");
   const salt = knownSalts?.get(day) ?? (await dailySalt(db, day));
   const key = await hmacSha256(utf8(secret), utf8(`d2v-ip|${day}|${salt}`));
-  return toHex(await hmacSha256(key, utf8(ip)));
+  return toHex(await hmacSha256(key, utf8(network)));
 }

@@ -8,7 +8,18 @@
 import { installHash, toHex } from "./crypto";
 import { requireSecret, type Env } from "./env";
 import { error, json, jsonText, readBoundedJson } from "./http";
-import { SCOPE, consumeAll, installCaps, ipHash, loadSettings, rateLimited, utcDay, type LimitCheck, type Settings } from "./limits";
+import {
+  SCOPE,
+  consumeAll,
+  installCaps,
+  ipHash,
+  loadSettings,
+  networkKey,
+  rateLimited,
+  utcDay,
+  type LimitCheck,
+  type Settings,
+} from "./limits";
 import { notify } from "./notify";
 import { RULES_VERSION, canon, signatureId } from "./signature";
 import { createUploadToken, type RequestedArtifact } from "./token";
@@ -173,8 +184,8 @@ export async function handleClaim(request: Request, env: Env, ctx: ExecutionCont
 
   // Rate limits, most specific first (spec section 5.5).
   const day = utcDay(now);
-  const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
-  const ipSubject = await ipHash(env, env.DB, ip, day, settings.salts);
+  const network = networkKey(request.headers.get("cf-connecting-ip"), 48);
+  const ipSubject = await ipHash(env, env.DB, network, day, settings.salts);
   const perInstall = installCaps(settings.caps, build.channel);
   const checks: LimitCheck[] = [
     { scope: SCOPE.installClaims, subject: install, amount: 1, cap: perInstall.claims },
