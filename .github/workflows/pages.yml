@@ -7,6 +7,8 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      # The site tests hold the bug form against the frozen contract.
+      - "contract/schemas/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 

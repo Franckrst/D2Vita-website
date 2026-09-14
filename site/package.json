@@ -8,6 +8,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "ajv": "8.20.0",
     "happy-dom": "20.14.5",
     "vitest": "4.1.11"
   }
