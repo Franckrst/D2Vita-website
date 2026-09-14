@@ -266,9 +266,9 @@ the length of the sample lease).
   languages (`privacy.server.claim`).
   It is a data-minimisation step backwards and it is **the maintainer's call**,
   not this track's: keeping it needs nothing, and undoing it is one line in
-  `src/claims.ts` (store `{ install_id: _notStored, ...claim }`) plus a
-  `ClaimStored` definition in a **v2** of the contract whose `install_id` is
-  optional — never an edit to v1.
+  `src/claims.ts` (bind `const { install_id: _notStored, ...stored } = claim;`
+  and store `stored`) plus a `ClaimStored` definition in a **v2** of the
+  contract whose `install_id` is optional — never an edit to v1.
 - Every report keeps the `rules_version` its signature was computed under
   (`reports.rules_version`, migration `0002`), and `admin.v1#ReportDetail`
   returns that column, not the version the running Worker uses. Design section
