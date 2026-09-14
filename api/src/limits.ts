@@ -3,6 +3,7 @@
 // requests can never push a counter above its cap.
 
 import { hmacSha256, toHex, utf8 } from "./crypto";
+import { requireSecret } from "./env";
 import { json } from "./http";
 import type { Channel } from "./types";
 import type { SettingsPatch } from "./validate";
@@ -155,11 +156,6 @@ async function dailySalt(db: D1Database, day: string): Promise<string> {
   ]);
   const value = selected?.results[0]?.value;
   if (!value) throw new Error("daily salt unavailable");
-  return value;
-}
-
-export function requireSecret(value: string | undefined, name: string): string {
-  if (!value) throw new Error(`secret ${name} is not configured`);
   return value;
 }
 

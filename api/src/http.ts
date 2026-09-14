@@ -1,6 +1,21 @@
-// HTTP helpers: v1 JSON bodies and error bodies.
+// HTTP helpers: v1 JSON bodies, error bodies, response signing, body limits.
+
+import { ed25519Sign } from "./crypto";
+import { requireSecret, type Env } from "./env";
 
 export const API_VERSION = 1;
+
+// Console responses carry X-D2V-Signature: base64 Ed25519 of the exact body.
+export async function signResponse(env: Env, response: Response): Promise<Response> {
+  const body = new Uint8Array(await response.arrayBuffer());
+  const headers = new Headers(response.headers);
+  headers.set("x-d2v-signature", await ed25519Sign(requireSecret(env.RESPONSE_SIGNING_KEY, "RESPONSE_SIGNING_KEY"), body));
+  return new Response(body, { status: response.status, headers });
+}
+
+export function jsonText(text: string, status = 200): Response {
+  return new Response(text, { status, headers: { "content-type": "application/json; charset=utf-8" } });
+}
 
 export function json(body: Record<string, unknown>, status = 200, headers?: HeadersInit): Response {
   const h = new Headers(headers);

@@ -1,0 +1,61 @@
+// Minimal router. `now` (Unix seconds) is injected so tests control the clock.
+
+import { handleClaim } from "./claims";
+import type { Env } from "./env";
+import { error, signResponse } from "./http";
+
+export type Handler = (
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  now: number,
+  params: string[],
+) => Promise<Response>;
+
+interface Route {
+  method: string;
+  pattern: RegExp;
+  handler: Handler;
+}
+
+const routes: Route[] = [{ method: "POST", pattern: /^\/v1\/claims$/, handler: handleClaim }];
+
+// Responses to the console are signed, errors included, so a hostile network
+// can neither forge a disable_until_unix nor trigger uploads.
+function isConsolePath(path: string): boolean {
+  return path === "/v1/claims" || path.startsWith("/v1/reports/");
+}
+
+async function dispatch(request: Request, env: Env, ctx: ExecutionContext, now: number, path: string) {
+  const allowed: string[] = [];
+  for (const route of routes) {
+    const match = route.pattern.exec(path);
+    if (!match) continue;
+    if (route.method === request.method) return route.handler(request, env, ctx, now, match.slice(1));
+    allowed.push(route.method);
+  }
+  if (allowed.length > 0) {
+    const response = error(405, "method_not_allowed", "Method not allowed");
+    response.headers.set("allow", allowed.join(", "));
+    return response;
+  }
+  return error(404, "not_found", "No such route");
+}
+
+export async function handle(request: Request, env: Env, ctx: ExecutionContext, now: number): Promise<Response> {
+  const path = new URL(request.url).pathname;
+  let response: Response;
+  try {
+    response = await dispatch(request, env, ctx, now, path);
+  } catch (e) {
+    console.error("unhandled error:", e instanceof Error ? e.message : String(e));
+    response = error(500, "internal", "Internal error");
+  }
+  if (!isConsolePath(path)) return response;
+  try {
+    return await signResponse(env, response);
+  } catch (e) {
+    console.error("response signing failed:", e instanceof Error ? e.message : String(e));
+    return error(500, "internal", "Internal error");
+  }
+}

@@ -16,3 +16,9 @@ export interface Env {
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
 }
+
+// Secrets are mandatory at run time: a missing one is a 500, never a bypass.
+export function requireSecret(value: string | undefined, name: string): string {
+  if (!value) throw new Error(`secret ${name} is not configured`);
+  return value;
+}

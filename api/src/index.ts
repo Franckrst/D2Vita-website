@@ -1,8 +1,8 @@
 import type { Env } from "./env";
-import { error } from "./http";
+import { handle } from "./router";
 
 export default {
-  async fetch(_request: Request, _env: Env, _ctx: ExecutionContext): Promise<Response> {
-    return error(404, "not_found", "No such route");
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return handle(request, env, ctx, Math.floor(Date.now() / 1000));
   },
 } satisfies ExportedHandler<Env>;
