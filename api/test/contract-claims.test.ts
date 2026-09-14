@@ -1,8 +1,10 @@
 // Claim validation against the contract: the 26 valid vectors are accepted,
 // the 70 vectors of contract/vectors/claims-invalid.v1.json are refused, and a
 // mutation sweep compares src/validate.ts with Ajv on the schema itself, so the
-// two cannot drift apart silently.
-import { describe, expect, it } from "vitest";
+// two cannot drift apart silently. The last block sends every vector through
+// POST /v1/claims.
+import { env } from "cloudflare:workers";
+import { beforeAll, describe, expect, it } from "vitest";
 import { CLAIM_PATTERNS, validateClaim } from "../src/validate";
 import {
   INVALID_CLAIM_VECTORS,
@@ -12,6 +14,7 @@ import {
   contractValidator,
   matchesContract,
 } from "./contract";
+import { call, claimRequest, registerBuild, resetDatabase, signedJson } from "./helpers";
 
 const claimSchema = SCHEMAS["claim.v1"] as unknown as {
   $defs: Record<string, { pattern?: string }>;
@@ -150,6 +153,72 @@ function* mutants(claim: Record<string, unknown>): Generator<Mutant> {
   extra.unexpected = 1;
   yield { what: "add /unexpected", claim: extra };
 }
+
+// ---------------------------------------------------------------------------
+// The same vectors through the route, where a claim also has to be signed for,
+// counted and answered.
+
+describe("POST /v1/claims with the contract vectors", () => {
+  beforeAll(async () => {
+    await resetDatabase();
+    for (const build of new Set(SIGNATURE_VECTORS.map((v) => v.claim.build_id as string))) {
+      await registerBuild(build, build.includes("dirty") ? "test" : "release");
+    }
+  });
+
+  it.each(SIGNATURE_VECTORS.map((v) => [v.name, v] as const))(
+    "%s: 200 with the signature of the vector",
+    async (_name, vector) => {
+      const response = await call(claimRequest(vector.claim));
+      expect(response.status).toBe(200);
+      const decision = await signedJson(response);
+      expect(decision.report_id).toBe(vector.claim.report_id);
+      expect(decision.signature).toBe(vector.signature);
+      const row = await env.DB.prepare("SELECT canon, rules_version FROM signatures WHERE id = ?1")
+        .bind(vector.signature)
+        .first();
+      expect(row).toEqual({ canon: vector.canon, rules_version: 1 });
+    },
+  );
+
+  it("reads an integer written with a fraction as the contract says", async () => {
+    // JSON "1420.0" is the integer 1420: the signature is the vector's.
+    const vector = SIGNATURE_VECTORS.find((v) => v.name === "halt_code_written_as_float")!;
+    const body = JSON.stringify(vector.claim).replace('"code":1420', '"code":1420.0');
+    expect(body).toContain('"code":1420.0');
+    const request = new Request("https://api.test/v1/claims", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(new TextEncoder().encode(body).byteLength),
+        "x-d2v-client": `d2vita/${vector.claim.build_id as string}`,
+        "x-d2v-install": vector.claim.install_id as string,
+        "cf-connecting-ip": "198.51.100.77",
+      },
+      body,
+    });
+    const decision = await signedJson(await call(request));
+    expect(decision.signature).toBe(vector.signature);
+  });
+
+  it.each(INVALID_CLAIM_VECTORS.map((v) => [v.name, v] as const))(
+    "%s: signed 400 invalid_payload",
+    async (_name, vector) => {
+      const response = await call(claimRequest(vector.claim as Record<string, unknown>));
+      expect(response.status).toBe(400);
+      const body = await signedJson(response);
+      expect(body).toMatchObject({ v: 1, error: "invalid_payload" });
+      // Nothing of a claim the API did not read is echoed back.
+      expect(body.report_id).toBeUndefined();
+    },
+  );
+
+  it("counted every valid vector once and no invalid one", async () => {
+    const counted = await env.DB.prepare("SELECT COUNT(*) AS n, SUM(count) AS total FROM signatures").first();
+    const distinct = new Set(SIGNATURE_VECTORS.map((v) => v.signature)).size;
+    expect(counted).toEqual({ n: distinct, total: SIGNATURE_VECTORS.length });
+  });
+});
 
 describe("claim validation follows the schema on mutated vectors", () => {
   it("agrees with Ajv on every mutant of every valid vector", () => {
