@@ -2,12 +2,13 @@
 // Authorization: Bearer <token>; SHA-256(token) is compared in constant time
 // with ADMIN_TOKEN_SHA256. The router checks it before any admin dispatch.
 
-import { fromBase64Url, fromHex, sha256, timingSafeEqual, toBase64Url, utf8 } from "./crypto";
-import type { Env } from "./env";
+import { fromBase64Url, fromHex, installHash, sha256, timingSafeEqual, toBase64Url, utf8 } from "./crypto";
+import { requireSecret, type Env } from "./env";
 import { error, json, readBoundedJson } from "./http";
+import { SCOPE, loadSettings, saveSettings, utcDay, type Settings } from "./limits";
 import { ARTIFACT_NAMES, KINDS, type ArtifactName } from "./types";
 import { artifactKey } from "./uploads";
-import { validateBugPatch, validateSignaturePatch } from "./validate";
+import { validateBugPatch, validateBuildRegistration, validateSettingsPatch, validateSignaturePatch } from "./validate";
 
 const ADMIN_BODY_MAX_BYTES = 16 * 1024;
 
@@ -410,4 +411,129 @@ export async function patchBug(
   sets.push(`updated_at = ?${binds.push(now)}`);
   await env.DB.prepare(`UPDATE bugs SET ${sets.join(", ")} WHERE id = ?${binds.push(id)}`).bind(...binds).run();
   return json({ bug: await bugById(env.DB, id) });
+}
+
+// ---------------------------------------------------------------------------
+// Builds, erasure, quotas and settings.
+
+export async function postBuild(
+  request: Request,
+  env: Env,
+  _ctx: ExecutionContext,
+  now: number,
+): Promise<Response> {
+  const body = await readBoundedJson(request, ADMIN_BODY_MAX_BYTES);
+  if (!body.ok) return body.response;
+  const validation = validateBuildRegistration(body.value);
+  if (!validation.ok) return error(400, "invalid_payload", validation.error);
+  const { build_id, version, channel } = validation.value;
+  const [inserted, , row] = await env.DB.batch<Row>([
+    env.DB.prepare(
+      "INSERT INTO builds (build_id, version, channel, registered_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (build_id) DO NOTHING",
+    ).bind(build_id, version, channel, now),
+    env.DB.prepare("UPDATE builds SET version = ?2, channel = ?3 WHERE build_id = ?1").bind(build_id, version, channel),
+    env.DB.prepare("SELECT build_id, version, channel, registered_at FROM builds WHERE build_id = ?1").bind(build_id),
+  ]);
+  const created = (inserted?.meta.changes ?? 0) > 0;
+  return json({ created, build: row?.results[0] }, created ? 201 : 200);
+}
+
+const INSTALL_ID = /^[0-9a-f]{32}$/;
+
+// GDPR erasure: claims and sealed pieces of one installation. Aggregate
+// counters (count, per-build counts) stay; distinct consoles lose this one.
+// Safe to re-run if interrupted.
+export async function deleteInstall(
+  _request: Request,
+  env: Env,
+  _ctx: ExecutionContext,
+  _now: number,
+  params: string[],
+): Promise<Response> {
+  const installId = params[0] ?? "";
+  if (!INSTALL_ID.test(installId)) return error(400, "invalid_payload", "install_id: must be 32 lower-case hex characters");
+  const hash = await installHash(requireSecret(env.INSTALL_HASH_KEY, "INSTALL_HASH_KEY"), installId);
+  const db = env.DB;
+  const ofInstall = "SELECT report_id FROM reports WHERE install_hash = ?1";
+
+  await db.batch([
+    db.prepare(
+      `UPDATE signatures SET sample_state = 'none', sample_report = NULL, lease_report = NULL, lease_expires = NULL
+       WHERE sample_report IN (${ofInstall}) OR lease_report IN (${ofInstall})`,
+    ).bind(hash),
+    db.prepare(
+      "UPDATE signatures SET installs = MAX(installs - 1, 0) WHERE id IN (SELECT signature FROM signature_installs WHERE install_hash = ?1)",
+    ).bind(hash),
+    db.prepare("DELETE FROM signature_installs WHERE install_hash = ?1").bind(hash),
+    db.prepare("DELETE FROM rate_counters WHERE subject = ?1").bind(hash),
+  ]);
+
+  let deletedReports = 0;
+  let deletedArtifacts = 0;
+  for (;;) {
+    const { results } = await db
+      .prepare("SELECT report_id, signature, artifacts FROM reports WHERE install_hash = ?1 LIMIT 50")
+      .bind(hash)
+      .all<{ report_id: string; signature: string; artifacts: string }>();
+    if (results.length === 0) break;
+    const keys = results.flatMap((r) =>
+      Object.keys(JSON.parse(r.artifacts) as object).map((name) => artifactKey(r.signature, r.report_id, name)),
+    );
+    // Pieces first: an interrupted run leaves rows that a re-run cleans up.
+    if (keys.length > 0) await env.ARTIFACTS.delete(keys);
+    const ids = results.map((r) => r.report_id);
+    await db
+      .prepare(`DELETE FROM reports WHERE report_id IN (${ids.map((_, i) => `?${i + 1}`).join(", ")})`)
+      .bind(...ids)
+      .run();
+    deletedReports += results.length;
+    deletedArtifacts += keys.length;
+  }
+  return json({ deleted_reports: deletedReports, deleted_artifacts: deletedArtifacts });
+}
+
+function publicSettings(settings: Settings) {
+  return { accepting: settings.accepting, disable_until_unix: settings.disable_until_unix, caps: settings.caps };
+}
+
+export async function getStats(
+  _request: Request,
+  env: Env,
+  _ctx: ExecutionContext,
+  now: number,
+): Promise<Response> {
+  const day = utcDay(now);
+  const settings = await loadSettings(env.DB);
+  const [counters, totals] = await env.DB.batch<Row>([
+    env.DB.prepare("SELECT scope, n FROM rate_counters WHERE subject = '*' AND day = ?1").bind(day),
+    env.DB.prepare(
+      `SELECT (SELECT COUNT(*) FROM signatures) AS signatures,
+              (SELECT COUNT(*) FROM reports) AS reports,
+              (SELECT COUNT(*) FROM signatures WHERE sample_state = 'stored') AS stored_samples,
+              (SELECT COUNT(*) FROM bugs) AS bugs,
+              (SELECT COUNT(*) FROM builds) AS builds`,
+    ),
+  ]);
+  const used = (scope: string) => (counters?.results.find((c) => c.scope === scope)?.n as number | undefined) ?? 0;
+  return json({
+    day,
+    now,
+    today: {
+      claims: { used: used(SCOPE.globalClaims), cap: settings.caps.global_claims },
+      artifact_bytes: { used: used(SCOPE.globalBytes), cap: settings.caps.global_artifact_bytes },
+      new_signatures: { used: used(SCOPE.globalNewSignatures), cap: settings.caps.global_new_signatures },
+      bugs: { used: used(SCOPE.globalBugs), cap: settings.caps.global_bugs },
+    },
+    totals: totals?.results[0],
+    settings: publicSettings(settings),
+  });
+}
+
+export async function putSettings(request: Request, env: Env): Promise<Response> {
+  const body = await readBoundedJson(request, ADMIN_BODY_MAX_BYTES);
+  if (!body.ok) return body.response;
+  const validation = validateSettingsPatch(body.value);
+  if (!validation.ok) return error(400, "invalid_payload", validation.error);
+  await saveSettings(env.DB, validation.value);
+  return json({ settings: publicSettings(await loadSettings(env.DB)) });
 }

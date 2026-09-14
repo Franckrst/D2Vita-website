@@ -1,15 +1,19 @@
 // Minimal router. `now` (Unix seconds) is injected so tests control the clock.
 
 import {
+  deleteInstall,
   getArtifact,
   getBug,
   getReport,
   getSignature,
+  getStats,
   isAdmin,
   listBugs,
   listSignatures,
   patchBug,
   patchSignature,
+  postBuild,
+  putSettings,
   unauthorized,
 } from "./admin";
 import { handleBug, handleBugPreflight } from "./bugs";
@@ -49,6 +53,10 @@ const routes: Route[] = [
   { method: "GET", pattern: /^\/v1\/admin\/bugs$/, handler: listBugs },
   { method: "GET", pattern: /^\/v1\/admin\/bugs\/([^/]+)$/, handler: getBug },
   { method: "PATCH", pattern: /^\/v1\/admin\/bugs\/([^/]+)$/, handler: patchBug },
+  { method: "POST", pattern: /^\/v1\/admin\/builds$/, handler: postBuild },
+  { method: "DELETE", pattern: /^\/v1\/admin\/installs\/([^/]+)$/, handler: deleteInstall },
+  { method: "GET", pattern: /^\/v1\/admin\/stats$/, handler: getStats },
+  { method: "PUT", pattern: /^\/v1\/admin\/settings$/, handler: putSettings },
 ];
 
 // Responses to the console are signed, errors included, so a hostile network
