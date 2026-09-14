@@ -75,47 +75,52 @@
   },
   "allOf": [
     {
-      "if": { "required": ["kind"], "properties": { "kind": { "const": "halt" } } },
+      "if": { "type": "object", "required": ["kind"], "properties": { "kind": { "const": "halt" } } },
       "then": {
+        "type": "object",
         "properties": {
           "features": { "$ref": "#/$defs/HaltFeatures" },
-          "hints": { "items": { "enum": ["abnormal_exit", "guest_fault", "hang"] } }
+          "hints": { "type": "array", "items": { "enum": ["abnormal_exit", "guest_fault", "hang"] } }
         }
       }
     },
     {
-      "if": { "required": ["kind"], "properties": { "kind": { "const": "guest_fault" } } },
+      "if": { "type": "object", "required": ["kind"], "properties": { "kind": { "const": "guest_fault" } } },
       "then": {
+        "type": "object",
         "properties": {
           "features": { "$ref": "#/$defs/GuestFaultFeatures" },
-          "hints": { "items": { "enum": ["hang"] } }
+          "hints": { "type": "array", "items": { "enum": ["hang"] } }
         }
       }
     },
     {
-      "if": { "required": ["kind"], "properties": { "kind": { "const": "host_fault" } } },
+      "if": { "type": "object", "required": ["kind"], "properties": { "kind": { "const": "host_fault" } } },
       "then": {
+        "type": "object",
         "properties": {
           "features": { "$ref": "#/$defs/HostFaultFeatures" },
-          "hints": { "items": { "enum": ["halt", "abnormal_exit", "guest_fault", "hang"] } }
+          "hints": { "type": "array", "items": { "enum": ["halt", "abnormal_exit", "guest_fault", "hang"] } }
         }
       }
     },
     {
-      "if": { "required": ["kind"], "properties": { "kind": { "const": "abnormal_exit" } } },
+      "if": { "type": "object", "required": ["kind"], "properties": { "kind": { "const": "abnormal_exit" } } },
       "then": {
+        "type": "object",
         "properties": {
           "features": { "$ref": "#/$defs/AbnormalExitFeatures" },
-          "hints": { "items": { "enum": ["guest_fault", "hang"] } }
+          "hints": { "type": "array", "items": { "enum": ["guest_fault", "hang"] } }
         }
       }
     },
     {
-      "if": { "required": ["kind"], "properties": { "kind": { "const": "hang" } } },
+      "if": { "type": "object", "required": ["kind"], "properties": { "kind": { "const": "hang" } } },
       "then": {
+        "type": "object",
         "properties": {
           "features": { "$ref": "#/$defs/HangFeatures" },
-          "hints": { "maxItems": 0 }
+          "hints": { "type": "array", "maxItems": 0 }
         }
       }
     }
@@ -193,22 +198,26 @@
       "description": "An array of {name, ...} objects where each artifact name appears at most once.",
       "allOf": [
         {
-          "contains": { "required": ["name"], "properties": { "name": { "const": "dump" } } },
+          "type": "array",
+          "contains": { "type": "object", "required": ["name"], "properties": { "name": { "const": "dump" } } },
           "minContains": 0,
           "maxContains": 1
         },
         {
-          "contains": { "required": ["name"], "properties": { "name": { "const": "crash_txt" } } },
+          "type": "array",
+          "contains": { "type": "object", "required": ["name"], "properties": { "name": { "const": "crash_txt" } } },
           "minContains": 0,
           "maxContains": 1
         },
         {
-          "contains": { "required": ["name"], "properties": { "name": { "const": "crash_log" } } },
+          "type": "array",
+          "contains": { "type": "object", "required": ["name"], "properties": { "name": { "const": "crash_log" } } },
           "minContains": 0,
           "maxContains": 1
         },
         {
-          "contains": { "required": ["name"], "properties": { "name": { "const": "boot_progress" } } },
+          "type": "array",
+          "contains": { "type": "object", "required": ["name"], "properties": { "name": { "const": "boot_progress" } } },
           "minContains": 0,
           "maxContains": 1
         }
@@ -218,20 +227,20 @@
       "description": "Sealed size caps from section 4.5 of the design: dump 2 MiB, crash_txt 64 KiB, crash_log 64 KiB, boot_progress 320 KiB. Applies to the bytes (claim) or max_bytes (decision) property.",
       "allOf": [
         {
-          "if": { "required": ["name"], "properties": { "name": { "const": "dump" } } },
-          "then": { "properties": { "bytes": { "maximum": 2097152 }, "max_bytes": { "maximum": 2097152 } } }
+          "if": { "type": "object", "required": ["name"], "properties": { "name": { "const": "dump" } } },
+          "then": { "type": "object", "properties": { "bytes": { "type": "integer", "maximum": 2097152 }, "max_bytes": { "type": "integer", "maximum": 2097152 } } }
         },
         {
-          "if": { "required": ["name"], "properties": { "name": { "const": "crash_txt" } } },
-          "then": { "properties": { "bytes": { "maximum": 65536 }, "max_bytes": { "maximum": 65536 } } }
+          "if": { "type": "object", "required": ["name"], "properties": { "name": { "const": "crash_txt" } } },
+          "then": { "type": "object", "properties": { "bytes": { "type": "integer", "maximum": 65536 }, "max_bytes": { "type": "integer", "maximum": 65536 } } }
         },
         {
-          "if": { "required": ["name"], "properties": { "name": { "const": "crash_log" } } },
-          "then": { "properties": { "bytes": { "maximum": 65536 }, "max_bytes": { "maximum": 65536 } } }
+          "if": { "type": "object", "required": ["name"], "properties": { "name": { "const": "crash_log" } } },
+          "then": { "type": "object", "properties": { "bytes": { "type": "integer", "maximum": 65536 }, "max_bytes": { "type": "integer", "maximum": 65536 } } }
         },
         {
-          "if": { "required": ["name"], "properties": { "name": { "const": "boot_progress" } } },
-          "then": { "properties": { "bytes": { "maximum": 335872 }, "max_bytes": { "maximum": 335872 } } }
+          "if": { "type": "object", "required": ["name"], "properties": { "name": { "const": "boot_progress" } } },
+          "then": { "type": "object", "properties": { "bytes": { "type": "integer", "maximum": 335872 }, "max_bytes": { "type": "integer", "maximum": 335872 } } }
         }
       ]
     },

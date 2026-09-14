@@ -169,6 +169,10 @@ uses the upload token there too.
 - Schemas are JSON Schema 2020-12. Validators must resolve the relative
   `$ref`s between the four files (register them all by `$id`), and must not
   rely on `format`, which is not used.
+- The schemas are written for ajv's strict mode (`new Ajv2020({strict: true})`):
+  every subschema that uses a type-specific keyword declares its `type`, and
+  every `required` name is listed in the same object's `properties`.
+  `check_schemas.py` enforces both rules.
 - Patterns are ECMA-262 regular expressions, always anchored `^...$`, with
   ASCII classes only. In Python, `$` also matches before a final newline:
   `check_schemas.py` validates with `\Z` instead, and several invalid claim

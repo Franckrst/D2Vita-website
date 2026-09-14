@@ -242,6 +242,31 @@ class ClaimSchemaInvalidTest(SchemaTestCase):
         self.assertInvalidAt(claim_of_kind("halt", redactions="3"), "/redactions")
 
 
+class StrictModeTest(SchemaTestCase):
+    """The schemas must compile under ajv's strict mode (strictTypes, strictRequired)."""
+
+    def test_contract_schemas_are_strict_clean(self):
+        for name, schema in check_schemas.load_schemas().items():
+            with self.subTest(schema=name):
+                self.assertEqual([], check_schemas.strict_mode_problems(schema))
+
+    def test_lint_catches_missing_type(self):
+        lint = check_schemas.strict_mode_problems
+        self.assertEqual([], lint({"type": "object", "properties": {"items": {"type": "array", "items": {}}},
+                                   "required": ["items"]}))
+        self.assertTrue(lint({"allOf": [{"if": {"properties": {"a": {"const": 1}}}, "then": {}}]}))
+        self.assertTrue(lint({"type": "object", "properties": {"n": {"maximum": 3}}}))
+        self.assertTrue(lint({"type": "array", "allOf": [{"contains": {"type": "object"}, "maxContains": 1}]}))
+        self.assertTrue(lint({"$defs": {"S": {"pattern": "^a$"}}}))
+        self.assertTrue(lint({"type": "string", "anyOf": [{"minLength": 1}]}))
+
+    def test_lint_catches_required_without_properties(self):
+        lint = check_schemas.strict_mode_problems
+        self.assertTrue(lint({"type": "object", "required": ["a"]}))
+        self.assertTrue(lint({"type": "object", "properties": {"a": {}},
+                              "allOf": [{"then": {"type": "object", "required": ["b"]}}]}))
+
+
 class PatternPortabilityTest(SchemaTestCase):
     """Patterns must mean the same thing in ECMA-262 (ajv) and in Python."""
 

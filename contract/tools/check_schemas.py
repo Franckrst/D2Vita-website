@@ -274,6 +274,58 @@ def pattern_portability_problems(pattern):
     return problems
 
 
+_TYPE_KEYWORDS = {
+    "object": ("properties", "required", "additionalProperties", "propertyNames", "minProperties",
+               "maxProperties", "patternProperties", "dependentRequired", "dependentSchemas"),
+    "array": ("items", "prefixItems", "contains", "minContains", "maxContains", "minItems", "maxItems",
+              "uniqueItems"),
+    "string": ("pattern", "minLength", "maxLength", "format"),
+    "number": ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"),
+}
+_SUBSCHEMA_KEYWORDS = ("items", "contains", "not", "if", "then", "else", "additionalProperties",
+                       "propertyNames", "unevaluatedItems", "unevaluatedProperties")
+_SUBSCHEMA_MAP_KEYWORDS = ("properties", "$defs", "patternProperties", "dependentSchemas")
+_SUBSCHEMA_LIST_KEYWORDS = ("allOf", "anyOf", "oneOf", "prefixItems")
+
+
+def _iter_subschemas(schema, where=""):
+    """Yield (pointer, schema object) for a schema and every subschema, keyword-aware."""
+    if not isinstance(schema, dict):
+        return
+    yield where, schema
+    for keyword in _SUBSCHEMA_KEYWORDS:
+        yield from _iter_subschemas(schema.get(keyword), f"{where}/{keyword}")
+    for keyword in _SUBSCHEMA_MAP_KEYWORDS:
+        for name, subschema in (schema.get(keyword) or {}).items():
+            yield from _iter_subschemas(subschema, f"{where}/{keyword}/{name}")
+    for keyword in _SUBSCHEMA_LIST_KEYWORDS:
+        for index, subschema in enumerate(schema.get(keyword) or ()):
+            yield from _iter_subschemas(subschema, f"{where}/{keyword}/{index}")
+
+
+def strict_mode_problems(schema):
+    """What ajv's strict mode would refuse, slightly stricter.
+
+    strictTypes: a schema object using a type-specific keyword declares that
+    type itself. strictRequired: every required name is in the same object's
+    properties.
+    """
+    problems = []
+    for where, node in _iter_subschemas(schema):
+        declared = node.get("type")
+        declared = {declared} if isinstance(declared, str) else set(declared or ())
+        if "integer" in declared:
+            declared.add("number")
+        for type_name, keywords in _TYPE_KEYWORDS.items():
+            used = [keyword for keyword in keywords if keyword in node]
+            if used and type_name not in declared:
+                problems.append(f"{where or '/'}: {', '.join(used)} without \"type\": \"{type_name}\"")
+        missing = [name for name in node.get("required", ()) if name not in (node.get("properties") or {})]
+        if missing:
+            problems.append(f"{where or '/'}: required {missing} not in properties")
+    return problems
+
+
 def check_schema_documents():
     """Raise if a schema document is not a sound 2020-12 contract schema."""
     jsonschema, _ = _import_jsonschema()
@@ -284,6 +336,9 @@ def check_schema_documents():
         if schema.get("$id") != f"{ID_PREFIX}{name}.schema.json":
             raise ValueError(f"{name}: unexpected $id {schema.get('$id')!r}")
         jsonschema.Draft202012Validator.check_schema(schema)
+        strict = strict_mode_problems(schema)
+        if strict:
+            raise ValueError(f"{name}: not strict-mode clean: {'; '.join(strict)}")
         resolver = registry.resolver(base_uri=schema["$id"])
         for where, node in _walk(schema):
             if isinstance(node.get("$ref"), str):

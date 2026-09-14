@@ -321,20 +321,22 @@
         }
       }
     },
-    "CapName": {
+    "Caps": {
       "description": "Daily caps of design section 5.5. prerelease_* apply to dev and test builds.",
-      "enum": [
-        "install_claims_per_day",
-        "install_artifact_bytes_per_day",
-        "prerelease_install_claims_per_day",
-        "prerelease_install_artifact_bytes_per_day",
-        "ip_claims_per_day",
-        "ip_bugs_per_day",
-        "global_claims_per_day",
-        "global_artifact_bytes_per_day",
-        "global_new_signatures_per_day",
-        "global_bugs_per_day"
-      ]
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "install_claims_per_day": { "$ref": "#/$defs/Count" },
+        "install_artifact_bytes_per_day": { "$ref": "#/$defs/Count" },
+        "prerelease_install_claims_per_day": { "$ref": "#/$defs/Count" },
+        "prerelease_install_artifact_bytes_per_day": { "$ref": "#/$defs/Count" },
+        "ip_claims_per_day": { "$ref": "#/$defs/Count" },
+        "ip_bugs_per_day": { "$ref": "#/$defs/Count" },
+        "global_claims_per_day": { "$ref": "#/$defs/Count" },
+        "global_artifact_bytes_per_day": { "$ref": "#/$defs/Count" },
+        "global_new_signatures_per_day": { "$ref": "#/$defs/Count" },
+        "global_bugs_per_day": { "$ref": "#/$defs/Count" }
+      }
     },
     "Settings": {
       "description": "Response of PUT /v1/admin/settings: the settings after the update.",
@@ -346,9 +348,21 @@
         "accepting": { "description": "Kill switch: false makes claims answer 503 not_accepting.", "type": "boolean" },
         "disable_until_unix": { "anyOf": [{ "$ref": "claim.v1.schema.json#/$defs/U32" }, { "type": "null" }] },
         "caps": {
+          "description": "Every cap is present. Value types come from Caps; the true entries only restate the required names, as ajv's strictRequired asks.",
+          "$ref": "#/$defs/Caps",
           "type": "object",
-          "additionalProperties": { "$ref": "#/$defs/Count" },
-          "propertyNames": { "$ref": "#/$defs/CapName" },
+          "properties": {
+            "install_claims_per_day": true,
+            "install_artifact_bytes_per_day": true,
+            "prerelease_install_claims_per_day": true,
+            "prerelease_install_artifact_bytes_per_day": true,
+            "ip_claims_per_day": true,
+            "ip_bugs_per_day": true,
+            "global_claims_per_day": true,
+            "global_artifact_bytes_per_day": true,
+            "global_new_signatures_per_day": true,
+            "global_bugs_per_day": true
+          },
           "required": [
             "install_claims_per_day",
             "install_artifact_bytes_per_day",
@@ -372,12 +386,7 @@
       "properties": {
         "accepting": { "type": "boolean" },
         "disable_until_unix": { "anyOf": [{ "$ref": "claim.v1.schema.json#/$defs/U32" }, { "type": "null" }] },
-        "caps": {
-          "type": "object",
-          "minProperties": 1,
-          "additionalProperties": { "$ref": "#/$defs/Count" },
-          "propertyNames": { "$ref": "#/$defs/CapName" }
-        }
+        "caps": { "$ref": "#/$defs/Caps", "type": "object", "minProperties": 1 }
       }
     },
     "ForgetInstallResult": {
@@ -421,12 +430,20 @@
       },
       "allOf": [
         {
-          "if": { "required": ["error"], "properties": { "error": { "const": "rate_limited" } } },
-          "then": { "required": ["retry_after_s"] }
+          "if": { "type": "object", "required": ["error"], "properties": { "error": { "const": "rate_limited" } } },
+          "then": {
+            "type": "object",
+            "required": ["retry_after_s"],
+            "properties": { "retry_after_s": { "$ref": "claim.v1.schema.json#/$defs/U32" } }
+          }
         },
         {
-          "if": { "required": ["error"], "properties": { "error": { "const": "not_accepting" } } },
-          "then": { "required": ["disable_until_unix"] }
+          "if": { "type": "object", "required": ["error"], "properties": { "error": { "const": "not_accepting" } } },
+          "then": {
+            "type": "object",
+            "required": ["disable_until_unix"],
+            "properties": { "disable_until_unix": { "$ref": "claim.v1.schema.json#/$defs/U32" } }
+          }
         }
       ]
     }

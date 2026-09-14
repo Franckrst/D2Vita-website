@@ -26,12 +26,12 @@
   },
   "allOf": [
     {
-      "if": { "required": ["action"], "properties": { "action": { "const": "upload" } } },
-      "then": { "properties": { "upload": { "$ref": "#/$defs/UploadGrant" } } }
+      "if": { "type": "object", "required": ["action"], "properties": { "action": { "const": "upload" } } },
+      "then": { "type": "object", "properties": { "upload": { "$ref": "#/$defs/UploadGrant" } } }
     },
     {
-      "if": { "required": ["action"], "properties": { "action": { "const": "count_only" } } },
-      "then": { "properties": { "upload": { "type": "null" } } }
+      "if": { "type": "object", "required": ["action"], "properties": { "action": { "const": "count_only" } } },
+      "then": { "type": "object", "properties": { "upload": { "type": "null" } } }
     }
   ],
   "$defs": {
