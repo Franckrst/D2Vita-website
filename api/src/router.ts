@@ -1,5 +1,6 @@
 // Minimal router. `now` (Unix seconds) is injected so tests control the clock.
 
+import { handleBug, handleBugPreflight } from "./bugs";
 import { handleClaim } from "./claims";
 import type { Env } from "./env";
 import { error, signResponse } from "./http";
@@ -23,6 +24,8 @@ const routes: Route[] = [
   { method: "POST", pattern: /^\/v1\/claims$/, handler: handleClaim },
   { method: "PUT", pattern: /^\/v1\/reports\/([^/]+)\/artifacts\/([^/]+)$/, handler: handleUpload },
   { method: "POST", pattern: /^\/v1\/reports\/([^/]+)\/complete$/, handler: handleComplete },
+  { method: "POST", pattern: /^\/v1\/bugs$/, handler: handleBug },
+  { method: "OPTIONS", pattern: /^\/v1\/bugs$/, handler: handleBugPreflight },
 ];
 
 // Responses to the console are signed, errors included, so a hostile network

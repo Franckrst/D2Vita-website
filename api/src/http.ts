@@ -27,6 +27,20 @@ export function error(status: number, code: string, message: string, extra?: Rec
   return json({ error: code, message, ...extra }, status);
 }
 
+// CORS is offered on /v1/bugs only, to the public site origin.
+export const DEFAULT_ALLOWED_ORIGIN = "https://franckrst.github.io";
+
+export function allowedOrigin(env: Env): string {
+  return env.ALLOWED_ORIGIN || DEFAULT_ALLOWED_ORIGIN;
+}
+
+export function withCors(response: Response, origin: string): Response {
+  const headers = new Headers(response.headers);
+  headers.set("access-control-allow-origin", origin);
+  headers.append("vary", "Origin");
+  return new Response(response.body, { status: response.status, headers });
+}
+
 // Declared Content-Length, or null when absent or malformed.
 export function declaredLength(request: Request): number | null {
   const header = request.headers.get("content-length");
