@@ -1,6 +1,6 @@
 import copy
 
-from tests.helpers import SchemaTestCase
+from tests.helpers import DESIGN_SEALED_CAPS, SchemaTestCase
 
 UPLOAD_DECISION = {
     "v": 1,
@@ -44,10 +44,7 @@ class DecisionSchemaTest(SchemaTestCase):
 
     def test_upload_grant_limits(self):
         full = mutated(UPLOAD_DECISION, lambda d: d["upload"].update(artifacts=[
-            {"name": "dump", "max_bytes": 2097152},
-            {"name": "crash_txt", "max_bytes": 65536},
-            {"name": "crash_log", "max_bytes": 65536},
-            {"name": "boot_progress", "max_bytes": 335872},
+            {"name": name, "max_bytes": cap} for name, cap in DESIGN_SEALED_CAPS.items()
         ]))
         self.assertValid(full)
 

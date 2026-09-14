@@ -8,6 +8,19 @@ import unittest
 
 import check_schemas
 
+KIB = 1024
+MIB = 1024 * KIB
+
+# Design section 4.5, column "Plafond (scelle)", in the design's own units.
+# Tests use these names, never bare byte counts, so a wrong cap in the schema
+# cannot be copied into the tests as well.
+DESIGN_SEALED_CAPS = {
+    "dump": 2 * MIB,
+    "crash_txt": 64 * KIB,
+    "crash_log": 64 * KIB,
+    "boot_progress": 320 * KIB,
+}
+
 # The claim from section 4.4 of the design spec, verbatim.
 SPEC_EXAMPLE_CLAIM = {
     "v": 1,

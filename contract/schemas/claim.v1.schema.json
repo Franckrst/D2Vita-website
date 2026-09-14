@@ -240,7 +240,7 @@
         },
         {
           "if": { "type": "object", "required": ["name"], "properties": { "name": { "const": "boot_progress" } } },
-          "then": { "type": "object", "properties": { "bytes": { "type": "integer", "maximum": 335872 }, "max_bytes": { "type": "integer", "maximum": 335872 } } }
+          "then": { "type": "object", "properties": { "bytes": { "type": "integer", "maximum": 327680 }, "max_bytes": { "type": "integer", "maximum": 327680 } } }
         }
       ]
     },

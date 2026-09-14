@@ -1,7 +1,7 @@
 import copy
 
 import check_schemas
-from tests.helpers import SPEC_EXAMPLE_CLAIM, SchemaTestCase, claim_of_kind
+from tests.helpers import DESIGN_SEALED_CAPS, SPEC_EXAMPLE_CLAIM, SchemaTestCase, claim_of_kind
 
 
 class ClaimSchemaValidTest(SchemaTestCase):
@@ -37,15 +37,15 @@ class ClaimSchemaValidTest(SchemaTestCase):
         claim = claim_of_kind("halt")
         claim["features"]["frames"] = ["Game+0x%x" % (0x1000 + i) for i in range(16)]
         claim["features"]["code"] = 4294967295
-        claim["artifacts"] = [
-            {"name": "dump", "bytes": 2097152},
-            {"name": "crash_txt", "bytes": 65536},
-            {"name": "crash_log", "bytes": 88},
-            {"name": "boot_progress", "bytes": 335872},
-        ]
         self.assertValid(claim)
         host = claim_of_kind("host_fault")
         host["features"]["guest_frames"] = ["Game+0x%x" % (0x2000 + i) for i in range(8)]
+        host["artifacts"] = [
+            {"name": "dump", "bytes": DESIGN_SEALED_CAPS["dump"]},
+            {"name": "crash_txt", "bytes": DESIGN_SEALED_CAPS["crash_txt"]},
+            {"name": "crash_log", "bytes": 88},
+            {"name": "boot_progress", "bytes": DESIGN_SEALED_CAPS["boot_progress"]},
+        ]
         self.assertValid(host)
 
     def test_address_edge_forms(self):
@@ -231,11 +231,7 @@ class ClaimSchemaInvalidTest(SchemaTestCase):
         too_small = claim_of_kind("halt")
         too_small["artifacts"][0]["bytes"] = 87
         self.assertInvalidAt(too_small, "/artifacts/0/bytes")
-        caps = {"dump": 2097152, "crash_txt": 65536, "crash_log": 65536, "boot_progress": 335872}
-        for name, cap in caps.items():
-            with self.subTest(name=name):
-                claim = claim_of_kind("halt", artifacts=[{"name": name, "bytes": cap + 1}])
-                self.assertInvalidAt(claim, "/artifacts/0/bytes")
+        # The cap of each artifact is tested in test_artifact_caps.py.
 
     def test_redactions_must_be_non_negative_integer(self):
         self.assertInvalidAt(claim_of_kind("halt", redactions=-1), "/redactions")

@@ -42,6 +42,8 @@ def dump(document):
 # --------------------------------------------------------------------------
 
 CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+KIB = 1024
+MIB = 1024 * KIB
 BASE_UNIX = 1789284000
 BUILD = "0.1.0+ab12cd34ef56"
 OTHER_BUILD = "0.1.1+0123456789ab-dirty"
@@ -240,6 +242,14 @@ SIGNATURE_CASES = [
     ("hang_unknown_eip",
      claim(23, "hang", {"stalled_beats": 2, "eip": None, "runner_state": None}, LOG_ARTIFACTS),
      "hang|-"),
+    # Every artifact at exactly its sealed cap (design section 4.5).
+    ("host_fault_artifacts_at_caps",
+     claim(24, "host_fault", {"stop_reason": "0x30004", "thread_name": "d2vita_main",
+                              "pc": host("jit", "jit", 0x1a2b3c), "lr": host("eboot", "eboot", 0x10a0c4),
+                              "guest_frames": frames(0x2b1c40), "redaction": "clean"},
+           [{"name": "dump", "bytes": 2 * MIB}, {"name": "crash_txt", "bytes": 64 * KIB},
+            {"name": "crash_log", "bytes": 64 * KIB}, {"name": "boot_progress", "bytes": 320 * KIB}]),
+     "hfault_jit|0x30004|Game+0x2b1c40"),
 ]
 
 
@@ -379,10 +389,13 @@ INVALID_CLAIM_CASES = [
      _append("/artifacts", {"name": "crash_log", "bytes": 100})),
     ("artifact_name_unknown", "spec_example_halt", "/artifacts/0/name", _set("/artifacts/0/name", "minidump")),
     ("artifact_below_sealed_minimum", "spec_example_halt", "/artifacts/0/bytes", _set("/artifacts/0/bytes", 87)),
-    ("artifact_dump_over_cap", "host_fault_eboot", "/artifacts/0/bytes", _set("/artifacts/0/bytes", 2097153)),
-    ("artifact_crash_txt_over_cap", "spec_example_halt", "/artifacts/0/bytes", _set("/artifacts/0/bytes", 65537)),
+    ("artifact_dump_over_cap", "host_fault_eboot", "/artifacts/0/bytes", _set("/artifacts/0/bytes", 2 * MIB + 1)),
+    ("artifact_crash_txt_over_cap", "spec_example_halt", "/artifacts/0/bytes",
+     _set("/artifacts/0/bytes", 64 * KIB + 1)),
+    ("artifact_crash_log_over_cap", "spec_example_halt", "/artifacts/1/bytes",
+     _set("/artifacts/1/bytes", 64 * KIB + 1)),
     ("artifact_boot_progress_over_cap", "spec_example_halt", "/artifacts/2/bytes",
-     _set("/artifacts/2/bytes", 335873)),
+     _set("/artifacts/2/bytes", 320 * KIB + 1)),
     ("redactions_negative", "spec_example_halt", "/redactions", _set("/redactions", -1)),
 ]
 
@@ -723,9 +736,9 @@ RESPONSE_BODIES = (
         "action": "upload",
         "upload": {"token": "eyJyIjoiMDFKOVo2VDRROE0zSzdWMkI1TjBYV0FZQ0QiLCJlIjoxNzg5Mjg2MDAwfQ.q8vLbWEt",
                    "expires_unix": 1789286000,
-                   "artifacts": [{"name": "crash_txt", "max_bytes": 65536},
-                                 {"name": "crash_log", "max_bytes": 65536},
-                                 {"name": "boot_progress", "max_bytes": 335872}]},
+                   "artifacts": [{"name": "crash_txt", "max_bytes": 64 * KIB},
+                                 {"name": "crash_log", "max_bytes": 64 * KIB},
+                                 {"name": "boot_progress", "max_bytes": 320 * KIB}]},
         "retry_after_s": None, "disable_until_unix": None})),
     ("decision_count_only", SIGNING_SEED_A, compact({
         "v": 1, "report_id": "01J9Z6T4Q8M3K7V2B5N0XWAYCD", "signature": "SZYGIRBIXGHOM3AH",

@@ -2799,6 +2799,54 @@
       }
     },
     {
+      "name": "artifact_crash_log_over_cap",
+      "base": "spec_example_halt",
+      "invalid_at": "/artifacts/1/bytes",
+      "claim": {
+        "v": 1,
+        "report_id": "01J9Z6T4Q8M3K7V2B5N0XWAYCD",
+        "install_id": "4f3c9a0e8b7d6c5a4f3e2d1c0b9a8f7e",
+        "build_id": "0.1.0+ab12cd34ef56",
+        "channel": "release",
+        "platform": {
+          "model": "vita",
+          "fw": "3.65"
+        },
+        "session": {
+          "started_unix": 1789284000,
+          "uptime_s": 967,
+          "online": false
+        },
+        "kind": "halt",
+        "features": {
+          "code": 1420,
+          "location": null,
+          "frames": [
+            "Game+0x1fedf4",
+            "Game+0x451c23",
+            "Game+0x44f570"
+          ]
+        },
+        "hints": [
+          "guest_fault"
+        ],
+        "artifacts": [
+          {
+            "name": "crash_txt",
+            "bytes": 2210
+          },
+          {
+            "name": "crash_log",
+            "bytes": 65537
+          },
+          {
+            "name": "boot_progress",
+            "bytes": 262144
+          }
+        ]
+      }
+    },
+    {
       "name": "artifact_boot_progress_over_cap",
       "base": "spec_example_halt",
       "invalid_at": "/artifacts/2/bytes",
@@ -2841,7 +2889,7 @@
           },
           {
             "name": "boot_progress",
-            "bytes": 335873
+            "bytes": 327681
           }
         ]
       }
