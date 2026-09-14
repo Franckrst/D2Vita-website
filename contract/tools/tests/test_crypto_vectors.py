@@ -38,6 +38,19 @@ class SealedVectorsTest(unittest.TestCase):
         names = [case["name"] for case in cases + self.document["negative_cases"]]
         self.assertEqual(len(names), len(set(names)))
 
+    def test_exact_multiples_at_the_console_chunk_size(self):
+        # A console sealer with fixed 64 KiB chunks must meet the empty last
+        # chunk in the shared vectors, not only with chunk_size 16.
+        shapes = {(len(bytes.fromhex(case["plaintext_hex"])), case["chunk_size"]) for case in self.document["cases"]}
+        self.assertIn((65536, 65536), shapes)  # one full chunk, then an empty last chunk
+        self.assertIn((65537, 65536), shapes)  # one full chunk, then a 1-byte last chunk
+        negatives = {case["name"]: case for case in self.document["negative_cases"]}
+        omitted = negatives["writer_omits_empty_last_chunk_65536"]
+        sealed = bytes.fromhex(omitted["sealed_hex"])
+        self.assertEqual(65536, int.from_bytes(sealed[64:68], "little"))
+        self.assertEqual(g.HEADER_SIZE + 65536 + g.TAG_SIZE, len(sealed))  # the empty last chunk is missing
+        self.assertEqual("truncated", omitted["expect"])
+
     def test_each_positive_case_reproduces_and_opens(self):
         for case in self.document["cases"]:
             with self.subTest(case=case["name"]):

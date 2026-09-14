@@ -564,6 +564,9 @@ SEALED_CASES = (
     ("two_chunks_then_empty", RECIPIENT_A_SK, 32, 16),
     ("chunk_size_one", RECIPIENT_B_SK, 3, 1),
     ("seventy_thousand_bytes", RECIPIENT_A_SK, 70000, 65536),
+    # The console's chunk size: exact multiple (empty last chunk) and one byte more.
+    ("exact_chunk_65536", RECIPIENT_A_SK, 65536, 65536),
+    ("chunk_plus_one_65536", RECIPIENT_A_SK, 65537, 65536),
 )
 
 
@@ -615,6 +618,8 @@ def _writer_bug_cases():
          seal_with_flags(pattern(16), pk, eph_sk, prefix, 16, [16], [1]), "truncated"),
         ("writer_never_sets_last_flag",
          seal_with_flags(pattern(17), pk, eph_sk, prefix, 16, [16, 1], [0, 0]), "tampered"),
+        ("writer_omits_empty_last_chunk_65536",
+         seal_with_flags(pattern(65536), pk, eph_sk, prefix, 65536, [65536], [1]), "truncated"),
     )
 
 
