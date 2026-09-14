@@ -137,16 +137,31 @@ when `report_id` (and the piece name) match its own request.
 
 Requests carry `X-D2V-Client: d2vita/<build_id>` and `X-D2V-Install: <install_id>`.
 **Every** response on these routes, errors included, carries
-`X-D2V-Signature: <base64 Ed25519 of the exact body bytes>`.
+`X-D2V-Signature: <base64 Ed25519 of the exact body bytes>`. **Only the body is
+signed**, never the status or the other headers.
 
 | Method | Path | Answers |
 |---|---|---|
 | POST | `/v1/claims` | `200` decision · `400 invalid_payload` · `403 unknown_build` · `413` · `429 rate_limited` · `503 not_accepting` |
-| PUT | `/v1/reports/{report_id}/artifacts/{name}` | `201 {report_id, name, bytes}` and `X-D2V-SHA256` · `400 invalid_payload` (bad path, body shorter/longer than declared or cut off, fewer than 88 bytes) · `403 bad_token` · `409 exists` · `413` · `429` · `500 internal_error` (R2 failed: retry later) · `503 not_accepting` |
+| PUT | `/v1/reports/{report_id}/artifacts/{name}` | `201 {report_id, name, bytes}` and `X-D2V-SHA256` (**unsigned**, see below) · `400 invalid_payload` (bad path, body shorter/longer than declared or cut off, fewer than 88 bytes) · `403 bad_token` · `409 exists` · `413` · `429` · `500 internal_error` (R2 failed: retry later) · `503 not_accepting` |
 | POST | `/v1/reports/{report_id}/complete` | `200 {"report_id":…,"sample_stored":bool}` · `400 invalid_payload` · `403 bad_token` · `409 incomplete` · `503 not_accepting` |
+
+`X-D2V-SHA256` on the 201 is **outside the signed bytes**: the console talks
+plain HTTP, so anyone on the path can change that header without breaking the
+signature. `decision.v1#ArtifactStored` has no room for the hash
+(`additionalProperties: false`), so it travels as a header and the console must
+not act on it — the piece it sent is what it hashed itself. The admin reads the
+same header over HTTPS, where it is worth something.
 
 The kill switch covers the three console routes: with `accepting: false` a
 claim, an upload and a `complete` all answer 503 with `disable_until_unix`.
+
+One answer, and only one, can reach a console unsigned: if
+`RESPONSE_SIGNING_KEY` is missing or malformed, there is nothing to sign with,
+and the API answers an unsigned `500 internal_error` rather than an answer that
+pretends to be signed. The console treats an answer it cannot verify like a
+broken connection and retries later, so the failure mode is a stalled upload,
+never a forged instruction (`test/contract-response-sig.test.ts`).
 
 Decision (`action` is `upload` or `count_only`; `upload` is `null` for `count_only`):
 
@@ -171,6 +186,13 @@ the length of the sample lease).
 | OPTIONS | `/v1/bugs` | CORS preflight (`ALLOWED_ORIGIN` only) |
 
 ### Admin (`Authorization: Bearer <token>`)
+
+> **Read the status code on `DELETE /v1/admin/installs/{id}`.** An erasure that
+> ran out of D1 statements answers **202** with a body byte-identical to the
+> 200 one — `admin.v1#ForgetInstallResult` has no field for "call again", so
+> the status is the only completion signal. A client that looks at the body
+> alone will report a GDPR erasure as finished while reports and R2 objects are
+> still there. Repeat the call until it answers 200; the counts are per call.
 
 | Method | Path | Role |
 |---|---|---|
@@ -223,7 +245,9 @@ the length of the sample lease).
 - The SHA-256 of a piece is recorded in D1 (`reports.artifacts`) and returned
   as `X-D2V-SHA256` on the PUT and on the admin download; R2 custom metadata
   carries `bytes` and `build_id`. R2 needs metadata before a streamed body
-  starts, and bodies are never buffered.
+  starts, and bodies are never buffered. On the PUT that header is **not** part
+  of the signed bytes (see "Console"): it is a convenience for the admin over
+  HTTPS, not something the console may trust.
 - Two refusals the contract does not describe, both about states it could not
   represent honestly: a signature cannot become `fixed` without a
   `fixed_in_version` (a regression could never be noticed afterwards), and
