@@ -42,3 +42,16 @@ export function base32(bytes: Uint8Array): string {
 export async function sha256(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", data));
 }
+
+export async function hmacSha256(key: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
+  const k = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", k, data));
+}
+
+// Constant time for equal lengths (lengths are public: digests and MACs).
+export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
+  return diff === 0;
+}

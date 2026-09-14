@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { base32, fromHex, sha256, toHex, utf8 } from "../src/crypto";
+import { base32, fromHex, hmacSha256, sha256, timingSafeEqual, toHex, utf8 } from "../src/crypto";
+
+describe("hmacSha256", () => {
+  it("matches RFC 4231 test case 2", async () => {
+    const mac = await hmacSha256(utf8("Jefe"), utf8("what do ya want for nothing?"));
+    expect(toHex(mac)).toBe("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+  });
+});
+
+describe("timingSafeEqual", () => {
+  it("compares byte arrays", () => {
+    expect(timingSafeEqual(fromHex("0102"), fromHex("0102"))).toBe(true);
+    expect(timingSafeEqual(fromHex("0102"), fromHex("0103"))).toBe(false);
+    expect(timingSafeEqual(fromHex("0102"), fromHex("010203"))).toBe(false);
+  });
+});
 
 describe("base32 (RFC 4648, upper case, no padding)", () => {
   it.each([
