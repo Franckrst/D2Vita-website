@@ -156,8 +156,8 @@ Decision (`action` is `upload` or `count_only`; `upload` is `null` for `count_on
  "retry_after_s":null,"disable_until_unix":null}
 ```
 
-Pieces requested per kind (only those listed in the claim with `bytes` within
-the cap): `host_fault` → `dump` (2 MiB), `crash_log`, `boot_progress`;
+Pieces requested per kind, among those the claim lists (the schema already
+caps their size): `host_fault` → `dump` (2 MiB), `crash_log`, `boot_progress`;
 `halt`/`abnormal_exit` → `crash_txt` (64 KiB), `crash_log` (64 KiB),
 `boot_progress` (320 KiB); `guest_fault`/`hang` → `crash_log`, `boot_progress`.
 Uploads and `complete` use `Authorization: D2V-Upload <token>` (valid 30 min,
@@ -207,9 +207,11 @@ the length of the sample lease).
   what the API stores has to validate as an `admin.v1#BugItem` later.
 - `host_fault` with a PC region `unknown` is not in the rules table; it is
   grouped per build as `hfault_unknown|<build_id>|<pc.offset>|<lr.offset>`.
-- The claim schema accepts an optional top-level `redactions` count. Feature
-  fields may be missing or `null` (written `-` in the canon); unknown fields are
-  rejected. Free-text fields are printable ASCII without `|`.
+- A claim is taken exactly as `claim.v1` describes it, nothing more and nothing
+  less: every feature key present (`null` when unknown, written `-` in the
+  canon), addresses and hex values in their one spelling, hints strictly less
+  severe than the kind, sizes inside the sealed caps, a dump offered only by a
+  `host_fault` whose dump is clean, and the optional `redactions` count.
 - The daily byte caps are charged for **stored** pieces only. A read-only check
   answers 429 before the body is read when the budget is already short; the
   atomic charge happens once R2 has the piece (if another upload took the last
