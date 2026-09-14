@@ -63,10 +63,10 @@ describe("typography", () => {
   it("French puts a non-breaking space before : ; ! ? » and after «", () => {
     for (const [key, value] of Object.entries(dicts.fr)) {
       // The trademark keeps its official spelling.
-      const text = prose(value).replaceAll("Diablo II: Lord of Destruction", "");
+      const text = prose(value).replace(/Diablo[ \u00a0]II: Lord of Destruction/g, "");
       expect(/[ \t][:;!?»]/.test(text), `${key}: ordinary space before punctuation`).toBe(false);
       expect(/«[ \t]/.test(text), `${key}: ordinary space after «`).toBe(false);
-      expect(/[^\s  ][:;!?»]/.test(text), `${key}: missing space before punctuation`).toBe(false);
+      expect(/[^\s\u00a0\u202f][:;!?»]/.test(text), `${key}: missing space before punctuation`).toBe(false);
     }
   });
 
