@@ -32,9 +32,9 @@ export async function resetDatabase(): Promise<void> {
 }
 
 // Runs the Worker router with an injected clock and waits for waitUntil work.
-export async function call(request: Request, now = NOW): Promise<Response> {
+export async function call(request: Request, now = NOW, bindings: Cloudflare.Env = env): Promise<Response> {
   const ctx = createExecutionContext();
-  const response = await handle(request, env, ctx, now);
+  const response = await handle(request, bindings, ctx, now);
   await waitOnExecutionContext(ctx);
   return response;
 }

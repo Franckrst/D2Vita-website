@@ -9,6 +9,7 @@ import { installHash, toHex } from "./crypto";
 import { requireSecret, type Env } from "./env";
 import { error, json, jsonText, readBoundedJson } from "./http";
 import { SCOPE, consumeAll, installCaps, ipHash, loadSettings, rateLimited, utcDay, type LimitCheck, type Settings } from "./limits";
+import { notify } from "./notify";
 import { RULES_VERSION, canon, signatureId } from "./signature";
 import { createUploadToken, type RequestedArtifact } from "./token";
 import type { ArtifactName, Channel, Claim, Kind } from "./types";
@@ -186,8 +187,13 @@ export async function handleClaim(request: Request, env: Env, ctx: ExecutionCont
   if (await consumeAll(env.DB, day, checks)) return rateLimited(now);
 
   const outcome = await ingest(env, claim, build, install, rawId, rawCanon, target, now);
-  // Notifications are wired in by notify.ts (new signature, regression).
-  void ctx;
+  if (outcome.newSignature) {
+    ctx.waitUntil(notify(env, `D2Vita crash: new signature ${outcome.signature} (${claim.kind}) on ${claim.build_id}\n${rawCanon}`));
+  } else if (outcome.regressed) {
+    ctx.waitUntil(
+      notify(env, `D2Vita crash: signature ${outcome.signature} regressed on ${claim.build_id} (fixed in ${target.head?.fixed_in_version})`),
+    );
+  }
   return jsonText(outcome.decision);
 }
 
