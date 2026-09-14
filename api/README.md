@@ -64,11 +64,12 @@ answers 429; unknown build 403; forged, expired or unrequested upload token
 403; missing or oversized `Content-Length` 413; regression reopens a fixed
 signature; merges; CORS; Turnstile; cron retention.
 
-The upload tests that cut a body short or send too much ("refuses a body that
-does not match its Content-Length", "charges nothing for an interrupted
-piece") make the local R2 simulator print two `uncaught exception … Network
-connection lost` lines and one workerd `fixed-length pipe ended prematurely`
-trace per aborted put (three puts). They come from the simulator itself
+The upload tests that cut a body short, send too much or drop the connection
+("refuses a body that does not match its Content-Length", "charges nothing for
+an interrupted piece", "answers 400 when the connection drops mid-body") make
+the local R2 simulator print two `uncaught exception … Network connection lost`
+lines and one workerd `fixed-length pipe ended prematurely` trace per aborted
+put (four puts). They come from the simulator itself
 (reproduced with a bare `FixedLengthStream` + `put` and every promise observed;
 the storage-failure test, which replaces the simulator's put, prints none) and
 are expected.
@@ -81,6 +82,13 @@ npm run dev:migrate   # apply migrations to the local D1
 npm run dev           # wrangler dev --local on http://127.0.0.1:8787
 npm run dev:smoke     # register a test build, claim, upload, complete, read back, replay
 ```
+
+Known limit of local development: `wrangler dev` 4.124 exits ("Uncaught Error:
+Network connection lost", raised in its dev proxy) when a client disconnects in
+the middle of a request body. This happens with any Worker code (reproduced on
+this API before and after the upload changes) and does not concern Cloudflare's
+edge. Test interrupted uploads with `npm test`, or restart `wrangler dev` after
+such a test.
 
 `dev:smoke` checks every console response signature with `node:crypto` against
 the public key written in `.dev.client.json`. A manual cron run:

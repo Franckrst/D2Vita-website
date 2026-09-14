@@ -207,6 +207,29 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
     ]);
   });
 
+  it("answers 400 when the connection drops mid-body, and stores and charges nothing", async () => {
+    const g = await newUploadDecision();
+    let pulls = 0;
+    const dropped = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulls++ === 0) controller.enqueue(bytesOf(3000));
+        else controller.error(new Error("Network connection lost."));
+      },
+    });
+    const request = new Request(`https://api.test/v1/reports/${g.reportId}/artifacts/crash_txt`, {
+      method: "PUT",
+      headers: { "content-length": "5000", authorization: `D2V-Upload ${g.token}`, "cf-connecting-ip": "203.0.113.9" },
+      body: dropped,
+    });
+    const res = await call(request);
+    expect(res.status).toBe(400);
+    expect(await signedJson(res)).toMatchObject({ error: "invalid_payload", report_id: g.reportId, name: "crash_txt" });
+    expect(pulls).toBeGreaterThanOrEqual(2);
+    expect(await env.ARTIFACTS.head(`artifacts/${g.signature}/${g.reportId}/crash_txt.sealed`)).toBeNull();
+    expect(await byteCounters()).toEqual([]);
+    expect((await call(putRequest(g.reportId, "crash_txt", bytesOf(5000), g.token), NOW + 30)).status).toBe(201);
+  });
+
   it("answers a signed 500 storage_unavailable when R2 fails, charges nothing, and a retry succeeds", async () => {
     const g = await newUploadDecision();
     const failing = withPut(async (_key, body) => {
