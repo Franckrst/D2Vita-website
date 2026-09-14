@@ -102,16 +102,6 @@ function charCount(text: string): number {
   return n;
 }
 
-// Free text: code point count in [min, max]; `blankOk` allows whitespace-only.
-function text(min: number, max: number, blankOk = false): Check {
-  return (value, path) => {
-    if (typeof value !== "string") fail(path, "must be a string");
-    const n = charCount(value);
-    if (n < min || n > max) fail(path, `length must be in [${min}, ${max}] characters`);
-    if (!blankOk && min > 0 && value.trim() === "") fail(path, "must not be blank");
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Claim v1: contract/schemas/claim.v1.schema.json (design section 4.4).
 //
