@@ -22,6 +22,7 @@ from pathlib import Path
 
 CONTRACT_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_DIR = CONTRACT_DIR / "schemas"
+VECTOR_DIR = CONTRACT_DIR / "vectors"
 VENV_DIR = CONTRACT_DIR / ".venv"
 DIALECT = "https://json-schema.org/draft/2020-12/schema"
 ID_PREFIX = "https://raw.githubusercontent.com/Franckrst/D2Vita-website/main/contract/schemas/"
@@ -210,6 +211,17 @@ def schema_errors(schema_name, instance, definition=None):
     return sorted(validator.iter_errors(instance), key=lambda e: json_pointer(e.absolute_path))
 
 
+def error_pointers(errors):
+    """Instance JSON pointers of the errors, including nested anyOf/oneOf errors."""
+    pointers = set()
+    stack = list(errors)
+    while stack:
+        error = stack.pop()
+        pointers.add(json_pointer(error.absolute_path))
+        stack.extend(error.context or ())
+    return pointers
+
+
 def _walk(node, where=""):
     """Yield (json pointer, dict) for every object inside a schema document."""
     if isinstance(node, dict):
@@ -283,6 +295,67 @@ def check_schema_documents():
 
 
 # --------------------------------------------------------------------------
+# Vector files
+# --------------------------------------------------------------------------
+
+MIN_SIGNATURE_CASES = 14
+
+
+class VectorError(Exception):
+    """A vector file disagrees with the schemas or the signature rules."""
+
+
+def _cases(path):
+    document = json.loads(Path(path).read_text("utf-8"))
+    cases = document.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise VectorError(f"{path}: no cases")
+    names = [case.get("name") for case in cases]
+    if len(set(names)) != len(names):
+        raise VectorError(f"{path}: case names are not unique")
+    return document, cases
+
+
+def check_signature_vectors(path=VECTOR_DIR / "signatures.v1.json"):
+    """Validate every claim and recompute every canon and signature."""
+    document, cases = _cases(path)
+    if document.get("rules_version") != RULES_VERSION:
+        raise VectorError(f"{path}: rules_version is not {RULES_VERSION}")
+    for case in cases:
+        name = case["name"]
+        errors = schema_errors("claim.v1", case["claim"])
+        if errors:
+            raise VectorError(f"{name}: claim is invalid: {errors[0].message}")
+        expected = canon(case["claim"])
+        if case["canon"] != expected:
+            raise VectorError(f"{name}: canon {case['canon']!r}, rules give {expected!r}")
+        if case["signature"] != signature_id(case["canon"]):
+            raise VectorError(f"{name}: signature {case['signature']} does not match its canon")
+    if len(cases) < MIN_SIGNATURE_CASES:
+        raise VectorError(f"{path}: {len(cases)} cases, at least {MIN_SIGNATURE_CASES} expected")
+    return len(cases)
+
+
+def check_invalid_claim_vectors(path=VECTOR_DIR / "claims-invalid.v1.json",
+                                signatures_path=VECTOR_DIR / "signatures.v1.json"):
+    """Every claim must be rejected, with an error reported at invalid_at."""
+    _, cases = _cases(path)
+    _, valid_cases = _cases(signatures_path)
+    valid_names = {case["name"] for case in valid_cases}
+    for case in cases:
+        name = case["name"]
+        if case["base"] not in valid_names:
+            raise VectorError(f"{name}: base {case['base']!r} is not a case of {signatures_path}")
+        errors = schema_errors("claim.v1", case["claim"])
+        if not errors:
+            raise VectorError(f"{name}: claim is valid")
+        pointers = error_pointers(errors)
+        if case["invalid_at"] not in pointers:
+            raise VectorError(f"{name}: no error at {case['invalid_at']!r} (errors at {sorted(pointers)})")
+    return len(cases)
+
+
+# --------------------------------------------------------------------------
 # Command line
 # --------------------------------------------------------------------------
 
@@ -300,8 +373,15 @@ def _ensure_jsonschema():
 
 def main():
     _ensure_jsonschema()
-    check_schema_documents()
-    print(f"OK: {len(load_schemas())} schemas")
+    try:
+        check_schema_documents()
+        signatures = check_signature_vectors()
+        invalid = check_invalid_claim_vectors()
+    except (ValueError, VectorError) as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+    print(f"OK: {len(load_schemas())} schemas, {signatures} signature cases, "
+          f"{invalid} invalid claim cases")
     return 0
 
 

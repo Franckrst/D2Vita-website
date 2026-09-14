@@ -69,15 +69,7 @@ def claim_of_kind(kind, **overrides):
     return claim
 
 
-def error_pointers(errors):
-    """JSON pointers of every error, including nested anyOf/oneOf context."""
-    pointers = set()
-    stack = list(errors)
-    while stack:
-        error = stack.pop()
-        pointers.add(check_schemas.json_pointer(error.absolute_path))
-        stack.extend(error.context or ())
-    return pointers
+error_pointers = check_schemas.error_pointers
 
 
 class SchemaTestCase(unittest.TestCase):

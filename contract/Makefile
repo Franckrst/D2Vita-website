@@ -16,4 +16,5 @@ test: venv
 	$(VENV_PYTHON) -m unittest discover -s tools/tests -t tools
 
 check: test
+	$(VENV_PYTHON) tools/gen_vectors.py --check
 	$(VENV_PYTHON) tools/check_schemas.py
