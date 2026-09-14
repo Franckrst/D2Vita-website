@@ -337,7 +337,7 @@
       ]
     },
     "Settings": {
-      "description": "Response of GET and PUT /v1/admin/settings.",
+      "description": "Response of PUT /v1/admin/settings: the settings after the update.",
       "type": "object",
       "additionalProperties": false,
       "required": ["v", "accepting", "disable_until_unix", "caps"],
