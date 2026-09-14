@@ -12,8 +12,14 @@ import argparse
 import copy
 import hashlib
 import json
+import struct
 import sys
 from pathlib import Path
+
+import nacl.bindings as sodium
+import nacl.encoding
+import nacl.exceptions
+import nacl.hash
 
 import check_schemas
 
@@ -55,7 +61,7 @@ def install_id(index):
 
 def sealed_size(plaintext_bytes, chunk_size=65536):
     """Size of a D2VSEAL1 object (sealed-format.md): header, data, one tag per chunk."""
-    return 72 + plaintext_bytes + 16 * (plaintext_bytes // chunk_size + 1)
+    return 72 + plaintext_bytes + 16 * (plaintext_bytes // chunk_size + 1)  # HEADER_SIZE, TAG_SIZE
 
 
 def offers(*plaintext_sizes):
@@ -397,6 +403,125 @@ def build_invalid_claim_vectors(signature_document, cases=None):
                        "(RFC 6901) of the instance location where a validator reports an error.",
         "cases": built,
     }
+
+
+# --------------------------------------------------------------------------
+# D2VSEAL1 (reference implementation of sealed-format.md, with PyNaCl)
+# --------------------------------------------------------------------------
+
+MAGIC = b"D2VSEAL1"
+HEADER_SIZE = 72
+TAG_SIZE = 16
+NONCE_PREFIX_SIZE = 16
+CHUNK_SIZE = 65536
+MAX_CHUNK_SIZE = 1 << 20
+PATTERN = b"D2Vita D2VSEAL1 test vector: 0123456789 abcdefghijklmnopqrstuvwxyz\n"
+
+
+class OpenError(Exception):
+    """Opening failed. kind is truncated, malformed, wrong_key or tampered."""
+
+    def __init__(self, kind, detail):
+        super().__init__(f"{kind}: {detail}")
+        self.kind = kind
+
+
+def pattern(size):
+    """Deterministic plaintext of `size` bytes."""
+    return (PATTERN * (size // len(PATTERN) + 1))[:size]
+
+
+def blake2b_256(data):
+    return nacl.hash.blake2b(data, digest_size=32, encoder=nacl.encoding.RawEncoder)
+
+
+def key_id(recipient_pk):
+    return blake2b_256(recipient_pk)[:8]
+
+
+def derive_key(shared, eph_pk, recipient_pk):
+    return blake2b_256(MAGIC + shared + eph_pk + recipient_pk)
+
+
+def chunk_nonce(nonce_prefix, index):
+    return nonce_prefix + struct.pack("<Q", index)
+
+
+def build_header(recipient_pk, eph_pk, nonce_prefix, chunk_size):
+    return MAGIC + key_id(recipient_pk) + eph_pk + nonce_prefix + struct.pack("<I", chunk_size) + bytes(4)
+
+
+def chunk_layout(size, chunk_size):
+    """Plaintext length and last flag of each chunk: full chunks, then a shorter (maybe empty) last one."""
+    if not 1 <= chunk_size <= MAX_CHUNK_SIZE:
+        raise ValueError(f"chunk_size must be in [1, {MAX_CHUNK_SIZE}]")
+    full = size // chunk_size
+    return [chunk_size] * full + [size - full * chunk_size], [0] * full + [1]
+
+
+def seal_with_flags(plaintext, recipient_pk, eph_sk, nonce_prefix, chunk_size, chunk_lengths, last_flags):
+    """Seal with explicit chunk lengths and last flags (lets tests build broken writers)."""
+    if len(recipient_pk) != 32 or len(eph_sk) != 32 or len(nonce_prefix) != NONCE_PREFIX_SIZE:
+        raise ValueError("recipient_pk and eph_sk are 32 bytes, nonce_prefix is 16 bytes")
+    if not 1 <= chunk_size <= MAX_CHUNK_SIZE:
+        raise ValueError(f"chunk_size must be in [1, {MAX_CHUNK_SIZE}]")
+    if sum(chunk_lengths) != len(plaintext) or len(chunk_lengths) != len(last_flags):
+        raise ValueError("chunk_lengths must cover the plaintext, one last flag per chunk")
+    eph_pk = sodium.crypto_scalarmult_base(eph_sk)
+    key = derive_key(sodium.crypto_scalarmult(eph_sk, recipient_pk), eph_pk, recipient_pk)
+    header = build_header(recipient_pk, eph_pk, nonce_prefix, chunk_size)
+    out, offset = [header], 0
+    for index, (length, last) in enumerate(zip(chunk_lengths, last_flags)):
+        chunk = plaintext[offset : offset + length]
+        offset += length
+        out.append(sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+            chunk, header + bytes([last]), chunk_nonce(nonce_prefix, index), key))
+    return b"".join(out)
+
+
+def seal(plaintext, recipient_pk, eph_sk, nonce_prefix, chunk_size=CHUNK_SIZE):
+    lengths, flags = chunk_layout(len(plaintext), chunk_size)
+    return seal_with_flags(plaintext, recipient_pk, eph_sk, nonce_prefix, chunk_size, lengths, flags)
+
+
+def open_sealed(sealed, recipient_sk):
+    """Open a D2VSEAL1 object; checks in the order given by sealed-format.md."""
+    if len(sealed) < HEADER_SIZE:
+        raise OpenError("truncated", f"{len(sealed)} bytes, shorter than the header")
+    header = sealed[:HEADER_SIZE]
+    (chunk_size,) = struct.unpack_from("<I", header, 64)
+    if header[:8] != MAGIC:
+        raise OpenError("malformed", "bad magic")
+    if header[68:72] != bytes(4):
+        raise OpenError("malformed", "reserved bytes are not zero")
+    if not 1 <= chunk_size <= MAX_CHUNK_SIZE:
+        raise OpenError("malformed", f"chunk_size {chunk_size} out of range")
+    recipient_pk = sodium.crypto_scalarmult_base(recipient_sk)
+    if header[8:16] != key_id(recipient_pk):
+        raise OpenError("wrong_key", "key_id does not match the recipient key")
+    eph_pk = header[16:48]
+    try:
+        shared = sodium.crypto_scalarmult(recipient_sk, eph_pk)
+    except RuntimeError:  # libsodium refuses an all-zero result
+        shared = bytes(32)
+    if shared == bytes(32):
+        raise OpenError("malformed", "X25519 output is all zero (low-order ephemeral key)")
+    key = derive_key(shared, eph_pk, recipient_pk)
+    body = sealed[HEADER_SIZE:]
+    full = chunk_size + TAG_SIZE
+    if len(body) % full < TAG_SIZE:
+        raise OpenError("truncated", "the object does not end with a last chunk")
+    count = len(body) // full + 1
+    plaintext = []
+    for index in range(count):
+        last = index == count - 1
+        chunk = body[index * full :] if last else body[index * full : (index + 1) * full]
+        try:
+            plaintext.append(sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+                chunk, header + bytes([last]), chunk_nonce(header[48:64], index), key))
+        except nacl.exceptions.CryptoError:
+            raise OpenError("tampered", f"chunk {index} failed authentication") from None
+    return b"".join(plaintext)
 
 
 # --------------------------------------------------------------------------
