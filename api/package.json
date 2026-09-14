@@ -7,7 +7,10 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "dev": "wrangler dev --local"
+    "dev": "wrangler dev --local",
+    "dev:secrets": "node scripts/dev-secrets.mjs",
+    "dev:migrate": "wrangler d1 migrations apply DB --local",
+    "dev:smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.22.0",
