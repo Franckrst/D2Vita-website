@@ -532,6 +532,8 @@ export async function getStats(
   return json({
     day,
     now,
+    // D1 Free refuses every write once a database reaches 500 MB.
+    database_bytes: totals?.meta.size_after ?? null,
     today: {
       claims: { used: used(SCOPE.globalClaims), cap: settings.caps.global_claims },
       artifact_bytes: { used: used(SCOPE.globalBytes), cap: settings.caps.global_artifact_bytes },

@@ -149,7 +149,7 @@ the length of the sample lease).
 | PATCH | `/v1/admin/bugs/{id}` | `status`, `issue_url`, `note` |
 | POST | `/v1/admin/builds` | `{build_id, version, channel}` (201 created, 200 updated) |
 | DELETE | `/v1/admin/installs/{install_id}` | erase the claims and pieces of one installation: `200 {done: true, deleted_reports, deleted_artifacts}`, or `202 {done: false, …}` when the run hit its D1 statement budget — **call again until it answers 200** (counts are per call) |
-| GET | `/v1/admin/stats` | today's global quota use, totals, settings |
+| GET | `/v1/admin/stats` | today's global quota use, totals, `database_bytes`, settings |
 | PUT | `/v1/admin/settings` | `{accepting, disable_until_unix, caps: {…}}` |
 
 ### Choices made where the design left room
@@ -207,6 +207,18 @@ D1 rows written per claim, measured with the local simulator: 10 for a known
 signature from a known console, 12 from a new console, 17 for a new signature
 (including the once-a-day IP salt). New signatures are capped at 200 per day,
 so the daily worst case stays near 25 000 writes (free quota: 100 000).
+
+**Database size.** D1 Free refuses every write once a database reaches 500 MB
+(claims, bugs and admin writes then fail). Measured growth per claim with the
+local simulator: about 1.2 KB for a typical claim (the spec example, 518 bytes
+of JSON) and 2.2 KB for a maximum-size one (1 182 bytes), plus about 0.2 KB when
+the console is new to the family (link row and a rate counter, the counter
+being deleted two days later). At the default cap of 2 000 claims a day kept
+180 days, that is roughly 0.43 to 0.51 GB for typical claims and 0.8 to 0.9 GB
+for maximum-size ones: only a flood at the caps sustained for months gets
+there. `GET /v1/admin/stats` returns `database_bytes`, and the daily cron logs
+it. Levers if it climbs: lower `global_claims` (settings, immediate), switch
+claims off, or move to D1 paid (10 GB).
 
 ### Retention (cron)
 

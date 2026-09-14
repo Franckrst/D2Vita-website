@@ -93,6 +93,8 @@ describe("runCron retention (spec section 5.6)", () => {
     await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('accepting', 'true')").run();
     const summary = await runCron(env, T);
     expect(summary).toMatchObject({ rate_counters: 2, ip_salts: 2 });
+    // The logged summary tracks the database size day by day.
+    expect(summary.database_bytes).toBeGreaterThan(0);
     const counters = await env.DB.prepare("SELECT day FROM rate_counters ORDER BY day DESC").all();
     expect(counters.results).toEqual([{ day: days[0] }, { day: days[1] }]);
     const settings = await env.DB.prepare("SELECT key FROM settings ORDER BY key").all();

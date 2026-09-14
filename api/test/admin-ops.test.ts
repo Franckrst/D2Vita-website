@@ -183,6 +183,7 @@ describe("GET /v1/admin/stats", () => {
       v: 1,
       day: "2026-09-13",
       now: NOW,
+      database_bytes: expect.any(Number),
       today: {
         claims: { used: 2, cap: 2000 },
         artifact_bytes: { used: 300, cap: 300 * 1024 * 1024 },
@@ -192,6 +193,8 @@ describe("GET /v1/admin/stats", () => {
       totals: { signatures: 1, reports: 2, stored_samples: 0, bugs: 1, builds: 1 },
       settings: expect.objectContaining({ accepting: true, disable_until_unix: null }),
     });
+    // D1 Free stops every write at 500 MB: the maintainer watches this.
+    expect(res.body.database_bytes).toBeGreaterThan(0);
     expect(JSON.stringify(res.body)).not.toContain("ip_salt");
   });
 });

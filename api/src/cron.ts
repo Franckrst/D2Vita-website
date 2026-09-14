@@ -28,6 +28,7 @@ export const RETENTION = {
 
 export interface CronSummary {
   complete: boolean; // false when the statement budget ran out (the next run continues)
+  database_bytes: number | null; // D1 Free refuses every write at 500 MB
   rate_counters: number;
   ip_salts: number;
   bugs: number;
@@ -43,6 +44,7 @@ export async function runCron(env: Env, now: number, budget = new StatementBudge
   const db = env.DB;
   const summary: CronSummary = {
     complete: false,
+    database_bytes: null,
     rate_counters: 0,
     ip_salts: 0,
     bugs: 0,
@@ -63,6 +65,7 @@ export async function runCron(env: Env, now: number, budget = new StatementBudge
   ]);
   summary.rate_counters = counters?.meta.changes ?? 0;
   summary.ip_salts = salts?.meta.changes ?? 0;
+  summary.database_bytes = salts?.meta.size_after ?? null;
 
   // 2. Bugs.
   if (!budget.take(1)) return summary;
