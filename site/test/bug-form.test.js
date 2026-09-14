@@ -231,6 +231,19 @@ describe("validation", () => {
     expect($(selector).getAttribute("aria-invalid")).toBeNull();
   });
 
+  it("counts characters as Unicode code points, like the API contract", async () => {
+    const emoji = "\u{1F409}"; // one code point, two UTF-16 units
+    fillValid({ title: emoji.repeat(120) });
+    ctx.turnstile.solve();
+    expect($("#bug-title-count").textContent).toBe("120 / 120");
+    expect($("#bug-title-count").classList.contains("is-over")).toBe(false);
+    type("#bug-title", emoji.repeat(121));
+    submit();
+    expect(errorText("title")).toBe(
+      dicts.fr["bug.error.tooLong"].replace("{max}", "120").replace("{excess}", "1"),
+    );
+  });
+
   it("counts characters for the title and description", () => {
     type("#bug-title", "abc");
     expect($("#bug-title-count").textContent).toBe("3 / 120");
@@ -276,6 +289,25 @@ describe("request", () => {
         turnstile_token: "tok-42",
       }),
     );
+  });
+
+  it("replaces control characters the contract forbids with spaces", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(201, { v: 1, id: "B12345678" }));
+    const { turnstile } = await setup({ fetchImpl });
+    fillValid({
+      title: "Crash\tin Act II",
+      description: "Line one\nLine two\twith a tab and a bell",
+      version: "0.1.0",
+      contact: "me@example.org",
+    });
+    turnstile.solve("tok");
+    submit();
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.title).toBe("Crash in Act II");
+    expect(body.description).toBe("Line one\nLine two\twith a tab  and a bell");
+    expect(body.version).toBe("0.1.0");
+    expect(body.contact).toBe("me @example.org");
   });
 
   it("omits contact when it is left empty and sends the page language by default", async () => {
