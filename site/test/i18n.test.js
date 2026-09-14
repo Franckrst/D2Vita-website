@@ -197,6 +197,12 @@ describe("renderInline", () => {
     expect(div.textContent).toBe(text);
   });
 
+  it("lets long paths in code spans wrap after each slash", () => {
+    const div = html("`ux0:data/d2vita/reports/consent.txt`");
+    expect(div.innerHTML).toBe("<code>ux0:data/<wbr>d2vita/<wbr>reports/<wbr>consent.txt</code>");
+    expect(div.textContent).toBe("ux0:data/d2vita/reports/consent.txt");
+  });
+
   it("keeps a link with an unsafe target as plain text", () => {
     const div = html("[clic](javascript:alert(1))");
     expect(div.querySelector("a")).toBeNull();
@@ -306,6 +312,32 @@ describe("createI18n", () => {
     expect(document.querySelector("a").textContent).toBe("Home");
     expect(document.documentElement.getAttribute("lang")).toBe("en");
     expect(seen).toEqual(["en"]);
+  });
+
+  it("brings the URL fragment target into view once the text is in", async () => {
+    document.body.insertAdjacentHTML("beforeend", '<section id="deletion"></section>');
+    const target = document.getElementById("deletion");
+    target.scrollIntoView = vi.fn();
+    await createI18n({
+      doc: document,
+      storage: memoryStorage(),
+      preferred: ["fr"],
+      hash: "#deletion",
+      loadDictionary: async (lang) => dicts[lang],
+    });
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "start", behavior: "instant" });
+  });
+
+  it("ignores a fragment that matches nothing", async () => {
+    await expect(
+      createI18n({
+        doc: document,
+        storage: memoryStorage(),
+        preferred: ["fr"],
+        hash: "#nowhere%20at%20all",
+        loadDictionary: async (lang) => dicts[lang],
+      }),
+    ).resolves.toBeDefined();
   });
 
   it("wires [data-lang-toggle] to the other language", async () => {

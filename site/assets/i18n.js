@@ -63,8 +63,12 @@ export function renderInline(text, doc = document) {
     if (match.index > last) fragment.append(text.slice(last, match.index));
     const [whole, code, strong, label, href] = match;
     if (code !== undefined) {
+      // Paths are long: offer a line break after each slash.
       const el = doc.createElement("code");
-      el.textContent = code;
+      code.split("/").forEach((part, index, parts) => {
+        el.append(index < parts.length - 1 ? `${part}/` : part);
+        if (index < parts.length - 1) el.append(doc.createElement("wbr"));
+      });
       fragment.append(el);
     } else if (strong !== undefined) {
       const el = doc.createElement("strong");
@@ -117,10 +121,26 @@ function defaultLoadDictionary(lang) {
 
 const otherLanguage = (lang) => LANGUAGES.find((l) => l !== lang) || DEFAULT_LANGUAGE;
 
+// The browser jumps to #fragment before the text exists; jump again once it does.
+function scrollToFragment(doc, hash) {
+  if (!hash || hash.length < 2) return;
+  let id;
+  try {
+    id = decodeURIComponent(hash.slice(1));
+  } catch {
+    return;
+  }
+  const target = doc.getElementById(id);
+  if (target && typeof target.scrollIntoView === "function") {
+    target.scrollIntoView({ block: "start", behavior: "instant" });
+  }
+}
+
 export async function createI18n({
   doc = document,
   storage = null,
   preferred = [],
+  hash = doc.defaultView?.location?.hash || "",
   loadDictionary = defaultLoadDictionary,
 } = {}) {
   const cache = new Map();
@@ -170,5 +190,6 @@ export async function createI18n({
       i18n.setLanguage(otherLanguage(state.lang));
     });
   }
+  scrollToFragment(doc, hash);
   return i18n;
 }
