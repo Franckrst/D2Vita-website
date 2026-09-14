@@ -18,3 +18,4 @@ test: venv
 check: test
 	$(VENV_PYTHON) tools/gen_vectors.py --check
 	$(VENV_PYTHON) tools/check_schemas.py
+	$(MAKE) -C tools/c_check check
