@@ -1,9 +1,8 @@
 // D2Vita crash-report API — Cloudflare Worker configuration.
 //
-// PLACEHOLDERS: every value marked REPLACE_AT_DEPLOY must be filled in on the
-// maintainer's machine right before the first deploy (see README.md). They are
-// intentionally invalid so an accidental deploy fails instead of binding the
-// wrong database. Local tests and `wrangler dev --local` do not need real ids.
+// database_id below are the real D1 database ids (account franck.rst@gmail.com,
+// created 2026-09-14). They are not secret, same as an account id — only
+// tokens and keys are. Local tests and `wrangler dev --local` do not need them.
 //
 // Secrets are NEVER written here. Set them with `wrangler secret put` (see
 // README.md): ADMIN_TOKEN_SHA256, UPLOAD_TOKEN_KEY, RESPONSE_SIGNING_KEY,
@@ -25,7 +24,7 @@
     {
       "binding": "DB",
       "database_name": "d2vita_crash",
-      "database_id": "REPLACE_AT_DEPLOY-d2vita_crash-database-id",
+      "database_id": "8c9aceca-b032-41a9-b025-c343a6072239",
       "migrations_dir": "migrations"
     }
   ],
@@ -49,7 +48,7 @@
         {
           "binding": "DB",
           "database_name": "d2vita_crash_staging",
-          "database_id": "REPLACE_AT_DEPLOY-d2vita_crash_staging-database-id",
+          "database_id": "16984491-359c-437e-800a-a831c68c380c",
           "migrations_dir": "migrations"
         }
       ],
