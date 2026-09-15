@@ -3,14 +3,14 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { handle } from "../src/router";
 import { admin, adminRequest, sendClaim, sigOf } from "./admin-helpers";
-import { BUILD_ID, haltClaim, hostFaultClaim, installId } from "./fixtures";
+import { BUILD_ID, haltClaim, haltFeatures, hostFaultClaim, installId } from "./fixtures";
 import { NOW, call, registerBuild, resetDatabase } from "./helpers";
 
 const OTHER_BUILD = "0.2.0+0123456789ab";
 
 const A = () => haltClaim(); // halt 1420
 const B = () => hostFaultClaim(); // host_fault eboot
-const C = () => haltClaim({ features: { code: 904, location: "Codec.cpp:1377", frames: ["Game+0x1"] } });
+const C = () => haltClaim({ features: haltFeatures({ code: 904, location: "Codec.cpp:1377", frames: ["Game+0x1"] }) });
 
 beforeEach(async () => {
   await resetDatabase();
@@ -60,18 +60,19 @@ describe("GET /v1/admin/signatures", () => {
     expect(byCount.status).toBe(200);
     expect(byCount.body.items.map((s: any) => s.id)).toEqual([a, c, b]);
     expect(byCount.body.next_cursor).toBeNull();
-    expect(byCount.body.items[0]).toMatchObject({
+    expect(byCount.body.items[0]).toEqual({
       id: a,
       kind: "halt",
+      canon: "halt|1420|-|Game+0x1fedf4,Game+0x451c23,Game+0x44f570",
       status: "open",
       count: 3,
       installs: 2,
-      first_seen: NOW + 10,
-      last_seen: NOW + 30,
+      first_seen_unix: NOW + 10,
+      last_seen_unix: NOW + 30,
       sample_state: "leased",
+      fixed_in_version: null,
       merged_into: null,
-      canon: "halt|1420|-|Game+0x1fedf4,Game+0x451c23,Game+0x44f570",
-      rules_version: 1,
+      issue_url: null,
     });
 
     const byLastSeen = await admin("GET", "/v1/admin/signatures?sort=last_seen");
@@ -93,7 +94,7 @@ describe("GET /v1/admin/signatures", () => {
   it("keeps a stable order for equal sort keys across pages", async () => {
     const ids: string[] = [];
     for (let i = 0; i < 5; i++) {
-      const claim = haltClaim({ features: { code: 100 + i, frames: [] } });
+      const claim = haltClaim({ features: haltFeatures({ code: 100 + i, frames: [] }) });
       await sendClaim(claim, NOW);
       ids.push(await sigOf(claim));
     }
@@ -131,20 +132,23 @@ describe("GET /v1/admin/signatures", () => {
 });
 
 describe("GET /v1/admin/signatures/{id}", () => {
-  it("returns per-build counters, distinct consoles, sample and recent reports", async () => {
+  it("returns per-build counters, distinct consoles, the sample and recent reports", async () => {
     const { c } = await seed();
     const res = await admin("GET", `/v1/admin/signatures/${c}`);
     expect(res.status).toBe(200);
-    const s = res.body.signature;
-    expect(s).toMatchObject({ id: c, count: 2, installs: 2, total_count: 2, merged_from: [] });
+    const s = res.body;
+    expect(s).toMatchObject({ id: c, count: 2, installs: 2, rules_version: 1, note: null });
     expect(s.builds).toEqual([
-      { build_id: OTHER_BUILD, count: 1, first_seen: NOW + 50, last_seen: NOW + 50 },
-      { build_id: BUILD_ID, count: 1, first_seen: NOW + 40, last_seen: NOW + 40 },
+      { build_id: OTHER_BUILD, count: 1, first_seen_unix: NOW + 50, last_seen_unix: NOW + 50 },
+      { build_id: BUILD_ID, count: 1, first_seen_unix: NOW + 40, last_seen_unix: NOW + 40 },
     ]);
-    expect(s.recent_reports.map((r: any) => r.received_at)).toEqual([NOW + 50, NOW + 40]);
-    expect(s.recent_reports[0]).toMatchObject({ build_id: OTHER_BUILD, kind: "halt", action: "count_only" });
+    expect(s.recent_reports.map((r: any) => r.received_unix)).toEqual([NOW + 50, NOW + 40]);
+    expect(s.recent_reports[0]).toMatchObject({ build_id: OTHER_BUILD, action: "count_only" });
     expect(s.recent_reports[1]).toMatchObject({ build_id: BUILD_ID, action: "upload" });
-    expect(s.sample).toMatchObject({ state: "leased", report_id: s.recent_reports[1].report_id });
+    // Nothing is stored yet: the lease is named apart from the sample.
+    expect(s).toMatchObject({ sample_state: "leased", sample_report: null, sample_artifacts: [] });
+    expect(s.lease_report).toBe(s.recent_reports[1].report_id);
+    expect(s.lease_expires_unix).toBe(NOW + 40 + 1800);
   });
 
   it("answers 404 for an unknown signature", async () => {

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  CAP_NAMES,
   DEFAULT_CAPS,
   consume,
   consumeAll,
@@ -136,37 +137,84 @@ describe("settings", () => {
     expect(settings.disable_until_unix).toBeNull();
     expect(settings.caps).toEqual(DEFAULT_CAPS);
     expect(settings.caps).toMatchObject({
-      install_claims: 3,
-      install_artifact_bytes: 3 * MiB,
-      ip_claims: 10,
-      ip_bugs: 3,
-      global_claims: 2000,
-      global_artifact_bytes: 300 * MiB,
-      global_new_signatures: 200,
-      global_bugs: 100,
+      install_claims_per_day: 3,
+      install_artifact_bytes_per_day: 3 * MiB,
+      ip_claims_per_day: 10,
+      ip_bugs_per_day: 3,
+      global_claims_per_day: 2000,
+      global_artifact_bytes_per_day: 300 * MiB,
+      global_new_signatures_per_day: 200,
+      global_bugs_per_day: 100,
     });
   });
 
   it("persists the kill switch and cap overrides", async () => {
-    await saveSettings(env.DB, { accepting: false, disable_until_unix: T + 3600, caps: { install_claims: 7 } });
+    await saveSettings(env.DB, { accepting: false, disable_until_unix: T + 3600, caps: { install_claims_per_day: 7 } });
     const settings = await loadSettings(env.DB);
     expect(settings.accepting).toBe(false);
     expect(settings.disable_until_unix).toBe(T + 3600);
-    expect(settings.caps.install_claims).toBe(7);
-    expect(settings.caps.ip_claims).toBe(10);
+    expect(settings.caps.install_claims_per_day).toBe(7);
+    expect(settings.caps.ip_claims_per_day).toBe(10);
     await saveSettings(env.DB, { accepting: true, disable_until_unix: null });
     const again = await loadSettings(env.DB);
     expect(again.accepting).toBe(true);
     expect(again.disable_until_unix).toBeNull();
-    expect(again.caps.install_claims).toBe(7);
+    expect(again.caps.install_claims_per_day).toBe(7);
+  });
+
+  it("takes over the caps a wave-1 database stored under the old names", async () => {
+    // The caps were renamed to the names of admin.v1#Caps. loadSettings
+    // ignores a `cap:` key it does not know, so without migration 0003 a
+    // database carried over from wave 1 would silently go back to the compiled
+    // defaults. The migration is replayed here over rows written the old way.
+    const OLD: Array<[string, number]> = [
+      ["cap:install_claims", 7],
+      ["cap:install_artifact_bytes", 1234],
+      ["cap:install_claims_dev", 77],
+      ["cap:install_artifact_bytes_dev", 12345],
+      ["cap:ip_claims", 5],
+      ["cap:ip_bugs", 2],
+      ["cap:global_claims", 500],
+      ["cap:global_artifact_bytes", 4321],
+      ["cap:global_new_signatures", 50],
+      ["cap:global_bugs", 20],
+    ];
+    await env.DB.batch(
+      OLD.map(([key, value]) =>
+        env.DB.prepare("INSERT INTO settings (key, value) VALUES (?1, ?2)").bind(key, String(value)),
+      ),
+    );
+    // A cap already set under its new name keeps the value set there.
+    await saveSettings(env.DB, { caps: { ip_bugs_per_day: 3 } });
+
+    const migration = env.TEST_MIGRATIONS.find((m) => m.name.includes("rename_cap_settings"));
+    expect(migration, "migration 0003_rename_cap_settings").toBeDefined();
+    for (const query of migration!.queries) await env.DB.prepare(query).run();
+
+    const settings = await loadSettings(env.DB);
+    expect(settings.caps).toEqual({
+      ...DEFAULT_CAPS,
+      install_claims_per_day: 7,
+      install_artifact_bytes_per_day: 1234,
+      prerelease_install_claims_per_day: 77,
+      prerelease_install_artifact_bytes_per_day: 12345,
+      ip_claims_per_day: 5,
+      ip_bugs_per_day: 3,
+      global_claims_per_day: 500,
+      global_artifact_bytes_per_day: 4321,
+      global_new_signatures_per_day: 50,
+      global_bugs_per_day: 20,
+    });
+    const { results } = await env.DB.prepare("SELECT key FROM settings WHERE key LIKE 'cap:%'").all<{ key: string }>();
+    expect(results.map((r) => r.key).filter((key) => !CAP_NAMES.includes(key.slice(4) as never))).toEqual([]);
   });
 
   it("raises the installation caps for dev and test builds only", () => {
     expect(installCaps(DEFAULT_CAPS, "release")).toEqual({ claims: 3, bytes: 3 * MiB });
     for (const channel of ["dev", "test"] as const) {
       const caps = installCaps(DEFAULT_CAPS, channel);
-      expect(caps.claims).toBe(DEFAULT_CAPS.install_claims_dev);
-      expect(caps.bytes).toBe(DEFAULT_CAPS.install_artifact_bytes_dev);
+      expect(caps.claims).toBe(DEFAULT_CAPS.prerelease_install_claims_per_day);
+      expect(caps.bytes).toBe(DEFAULT_CAPS.prerelease_install_artifact_bytes_per_day);
       expect(caps.claims).toBeGreaterThan(3);
       expect(caps.bytes).toBeGreaterThan(3 * MiB);
     }

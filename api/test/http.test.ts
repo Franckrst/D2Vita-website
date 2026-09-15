@@ -17,7 +17,7 @@ describe("readBoundedJson", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.response.status).toBe(413);
-      expect(await result.response.json()).toMatchObject({ v: 1, error: "length_required" });
+      expect(await result.response.json()).toMatchObject({ v: 1, error: "payload_too_large" });
     }
   });
 

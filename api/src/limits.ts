@@ -10,19 +10,20 @@ import type { SettingsPatch } from "./validate";
 
 const MiB = 1024 * 1024;
 
-// Initial values of the adjustable caps (PUT /v1/admin/settings overrides them).
+// Initial values of the adjustable caps (PUT /v1/admin/settings overrides
+// them). The names are those of admin.v1#Caps.
 export const DEFAULT_CAPS = {
-  install_claims: 3,
-  install_artifact_bytes: 3 * MiB,
+  install_claims_per_day: 3,
+  install_artifact_bytes_per_day: 3 * MiB,
   // dev/test builds are not distributed: raised caps.
-  install_claims_dev: 50,
-  install_artifact_bytes_dev: 64 * MiB,
-  ip_claims: 10,
-  ip_bugs: 3,
-  global_claims: 2000,
-  global_artifact_bytes: 300 * MiB,
-  global_new_signatures: 200,
-  global_bugs: 100,
+  prerelease_install_claims_per_day: 50,
+  prerelease_install_artifact_bytes_per_day: 64 * MiB,
+  ip_claims_per_day: 10,
+  ip_bugs_per_day: 3,
+  global_claims_per_day: 2000,
+  global_artifact_bytes_per_day: 300 * MiB,
+  global_new_signatures_per_day: 200,
+  global_bugs_per_day: 100,
 } as const;
 
 export type CapName = keyof typeof DEFAULT_CAPS;
@@ -50,7 +51,29 @@ export function secondsUntilNextUtcDay(nowUnix: number): number {
   return 86400 - (nowUnix % 86400);
 }
 
-// `bound` ties a console answer to its request ({report_id, name}).
+// The kill switch answers 503 not_accepting on every console route (claims,
+// pieces and complete). Without an end date set by the admin, the console is
+// told to come back in a day. `bound` ties the answer to its request.
+export const DEFAULT_DISABLE_SECONDS = 86400;
+
+export function notAccepting(settings: Settings, nowUnix: number, bound?: Record<string, unknown>): Response {
+  const until =
+    settings.disable_until_unix !== null && settings.disable_until_unix > nowUnix
+      ? settings.disable_until_unix
+      : nowUnix + DEFAULT_DISABLE_SECONDS;
+  return json(
+    {
+      error: "not_accepting",
+      message: "Crash reports are not accepted right now",
+      disable_until_unix: until,
+      ...bound,
+    },
+    503,
+    { "retry-after": String(until - nowUnix) },
+  );
+}
+
+// `bound` ties a console answer to its request ({report_id, artifact}).
 export function rateLimited(nowUnix: number, bound?: Record<string, unknown>): Response {
   const retry = secondsUntilNextUtcDay(nowUnix);
   return json(
@@ -136,8 +159,8 @@ export async function hasRoom(db: D1Database, day: string, checks: LimitCheck[])
 
 export function installCaps(caps: Caps, channel: Channel): { claims: number; bytes: number } {
   return channel === "release"
-    ? { claims: caps.install_claims, bytes: caps.install_artifact_bytes }
-    : { claims: caps.install_claims_dev, bytes: caps.install_artifact_bytes_dev };
+    ? { claims: caps.install_claims_per_day, bytes: caps.install_artifact_bytes_per_day }
+    : { claims: caps.prerelease_install_claims_per_day, bytes: caps.prerelease_install_artifact_bytes_per_day };
 }
 
 // ---------------------------------------------------------------------------

@@ -19,6 +19,17 @@ export function installId(): string {
 
 export const BUILD_ID = "0.1.0+ab12cd34ef56";
 
+// Halt features: every key of the contract schema is required, so an override
+// only changes what it names.
+export function haltFeatures(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    code: 1420,
+    location: null,
+    frames: ["Game+0x1fedf4", "Game+0x451c23", "Game+0x44f570"],
+    ...overrides,
+  };
+}
+
 // The claim of spec section 4.4 (halt), with fresh ids.
 export function haltClaim(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -30,11 +41,7 @@ export function haltClaim(overrides: Record<string, unknown> = {}): Record<strin
     platform: { model: "vita", fw: "3.65" },
     session: { started_unix: 1789284000, uptime_s: 967, online: false },
     kind: "halt",
-    features: {
-      code: 1420,
-      location: null,
-      frames: ["Game+0x1fedf4", "Game+0x451c23", "Game+0x44f570"],
-    },
+    features: haltFeatures(),
     hints: ["guest_fault"],
     artifacts: [
       { name: "crash_txt", bytes: 2210 },
@@ -49,10 +56,10 @@ export function hostFaultClaim(overrides: Record<string, unknown> = {}): Record<
   return haltClaim({
     kind: "host_fault",
     features: {
-      stop_reason: "DATA_ABORT",
+      stop_reason: "0x30004",
       thread_name: "d2main",
-      pc: { region: "eboot", module: "eboot.bin", offset: "0x1a2b" },
-      lr: { region: "eboot", module: "eboot.bin", offset: "0x3c4d" },
+      pc: { region: "eboot", module: "eboot", offset: "0x1a2b" },
+      lr: { region: "eboot", module: "eboot", offset: "0x3c4d" },
       guest_frames: ["Game+0x10", "Game+0x20"],
       redaction: "clean",
     },

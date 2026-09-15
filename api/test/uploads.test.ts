@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { sha256, toHex } from "../src/crypto";
 import { utcDay } from "../src/limits";
 import { createUploadToken } from "../src/token";
-import { haltClaim, hostFaultClaim } from "./fixtures";
+import { haltClaim, haltFeatures, hostFaultClaim } from "./fixtures";
 import {
   NOW,
   bytesOf,
@@ -67,13 +67,9 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
     const res = await call(putRequest(g.reportId, "crash_txt", body, g.token));
     expect(res.status).toBe(201);
     const expectedSha = toHex(await sha256(body));
-    expect(await signedJson(res)).toEqual({
-      v: 1,
-      report_id: g.reportId,
-      name: "crash_txt",
-      bytes: 5000,
-      sha256: expectedSha,
-    });
+    expect(await signedJson(res)).toEqual({ v: 1, report_id: g.reportId, name: "crash_txt", bytes: 5000 });
+    // decision.v1#ArtifactStored holds no hash: it travels in a header.
+    expect(res.headers.get("x-d2v-sha256")).toBe(expectedSha);
 
     const object = await env.ARTIFACTS.get(`artifacts/${g.signature}/${g.reportId}/crash_txt.sealed`);
     expect(object).not.toBeNull();
@@ -86,7 +82,7 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
 
   it("refuses an expired token", async () => {
     const g = await newUploadDecision();
-    const res = await call(putRequest(g.reportId, "crash_txt", bytesOf(10), g.token), NOW + 1801);
+    const res = await call(putRequest(g.reportId, "crash_txt", bytesOf(100), g.token), NOW + 1801);
     expect(res.status).toBe(403);
     expect(await signedJson(res)).toMatchObject({ error: "bad_token" });
   });
@@ -99,22 +95,25 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
       artifacts: [{ name: "crash_txt", max_bytes: 999999999 }],
       expires_unix: NOW + 99999,
     });
-    const res = await call(putRequest(g.reportId, "crash_txt", bytesOf(10), forged));
+    const res = await call(putRequest(g.reportId, "crash_txt", bytesOf(100), forged));
     expect(res.status).toBe(403);
-    const body = await signedJson(res);
-    expect(body).toMatchObject({ error: "bad_token" });
-    // Answers to unauthenticated requests are not bound to a report: anyone
-    // could obtain them for any report id.
-    expect(body.report_id).toBeUndefined();
+    // Every answer whose path names a report and a piece repeats them, so a
+    // console can tell the answer to its own request from a replayed one. It
+    // gives nothing away: anyone can send a request for any report id.
+    expect(await signedJson(res)).toMatchObject({
+      error: "bad_token",
+      report_id: g.reportId,
+      artifact: "crash_txt",
+    });
   });
 
   it("refuses a token of another report, a missing token and another scheme", async () => {
     const a = await newUploadDecision();
-    const b = await newUploadDecision({ features: { code: 7, frames: [] } });
+    const b = await newUploadDecision({ features: haltFeatures({ code: 7, frames: [] }) });
     for (const req of [
-      putRequest(b.reportId, "crash_txt", bytesOf(10), a.token),
-      putRequest(a.reportId, "crash_txt", bytesOf(10), null),
-      putRequest(a.reportId, "crash_txt", bytesOf(10), null, { authorization: `Bearer ${a.token}` }),
+      putRequest(b.reportId, "crash_txt", bytesOf(100), a.token),
+      putRequest(a.reportId, "crash_txt", bytesOf(100), null),
+      putRequest(a.reportId, "crash_txt", bytesOf(100), null, { authorization: `Bearer ${a.token}` }),
     ]) {
       const res = await call(req);
       expect(res.status).toBe(403);
@@ -125,11 +124,30 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
   it("refuses a piece that was not requested", async () => {
     const g = await newUploadDecision();
     expect(g.names).not.toContain("dump");
-    const res = await call(putRequest(g.reportId, "dump", bytesOf(10), g.token));
+    const res = await call(putRequest(g.reportId, "dump", bytesOf(100), g.token));
     expect(res.status).toBe(403);
-    const body = await signedJson(res);
-    expect(body).toMatchObject({ error: "bad_token", report_id: g.reportId });
-    expect(body.name).toBeUndefined();
+    expect(await signedJson(res)).toMatchObject({ error: "bad_token", report_id: g.reportId, artifact: "dump" });
+  });
+
+  it("refuses a path that is not a report id and a piece name with 400", async () => {
+    const g = await newUploadDecision();
+    const badReport = await call(putRequest("nope", "crash_txt", bytesOf(100), g.token));
+    expect(badReport.status).toBe(400);
+    expect(await signedJson(badReport)).toMatchObject({ error: "invalid_payload", artifact: "crash_txt" });
+    const badName = await call(putRequest(g.reportId, "savegame", bytesOf(100), g.token));
+    expect(badName.status).toBe(400);
+    expect(await signedJson(badName)).toMatchObject({ error: "invalid_payload", report_id: g.reportId });
+  });
+
+  it("refuses a body shorter than the smallest sealed object", async () => {
+    const g = await newUploadDecision();
+    const res = await call(putRequest(g.reportId, "crash_txt", bytesOf(87), g.token));
+    expect(res.status).toBe(400);
+    expect(await signedJson(res)).toMatchObject({
+      error: "invalid_payload",
+      report_id: g.reportId,
+      artifact: "crash_txt",
+    });
   });
 
   it("refuses a valid token for a report that got count_only", async () => {
@@ -143,17 +161,25 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
       artifacts: [{ name: "crash_txt", max_bytes: 65536 }],
       expires_unix: NOW + 1800,
     });
-    expect((await call(putRequest(claim.report_id as string, "crash_txt", bytesOf(10), token))).status).toBe(403);
+    expect((await call(putRequest(claim.report_id as string, "crash_txt", bytesOf(100), token))).status).toBe(403);
   });
 
   it("answers 413 without Content-Length (documented choice) and above the piece cap", async () => {
     const g = await newUploadDecision();
-    const noLength = await call(putRequest(g.reportId, "crash_txt", bytesOf(10), g.token, { "content-length": null }));
+    const noLength = await call(putRequest(g.reportId, "crash_txt", bytesOf(100), g.token, { "content-length": null }));
     expect(noLength.status).toBe(413);
-    expect(await signedJson(noLength)).toMatchObject({ error: "length_required" });
+    expect(await signedJson(noLength)).toMatchObject({
+      error: "payload_too_large",
+      report_id: g.reportId,
+      artifact: "crash_txt",
+    });
     const tooBig = await call(putRequest(g.reportId, "crash_txt", bytesOf(64 * KiB + 1), g.token));
     expect(tooBig.status).toBe(413);
-    expect(await signedJson(tooBig)).toMatchObject({ error: "payload_too_large", report_id: g.reportId, name: "crash_txt" });
+    expect(await signedJson(tooBig)).toMatchObject({
+      error: "payload_too_large",
+      report_id: g.reportId,
+      artifact: "crash_txt",
+    });
     expect(await env.ARTIFACTS.head(`artifacts/${g.signature}/${g.reportId}/crash_txt.sealed`)).toBeNull();
   });
 
@@ -168,7 +194,11 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
     ] as const) {
       const res = await call(putRequest(g.reportId, "crash_txt", bytesOf(sent), g.token, { "content-length": declared }));
       expect(res.status, `${sent} bytes sent, ${declared} declared`).toBe(400);
-      expect(await signedJson(res)).toMatchObject({ error: "invalid_payload", report_id: g.reportId, name: "crash_txt" });
+      expect(await signedJson(res)).toMatchObject({
+        error: "invalid_payload",
+        report_id: g.reportId,
+        artifact: "crash_txt",
+      });
       expect(await env.ARTIFACTS.head(`artifacts/${g.signature}/${g.reportId}/crash_txt.sealed`)).toBeNull();
     }
     const row = await env.DB.prepare("SELECT artifacts FROM reports WHERE report_id = ?1").bind(g.reportId).first();
@@ -223,14 +253,18 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
     });
     const res = await call(request);
     expect(res.status).toBe(400);
-    expect(await signedJson(res)).toMatchObject({ error: "invalid_payload", report_id: g.reportId, name: "crash_txt" });
+    expect(await signedJson(res)).toMatchObject({
+      error: "invalid_payload",
+      report_id: g.reportId,
+      artifact: "crash_txt",
+    });
     expect(pulls).toBeGreaterThanOrEqual(2);
     expect(await env.ARTIFACTS.head(`artifacts/${g.signature}/${g.reportId}/crash_txt.sealed`)).toBeNull();
     expect(await byteCounters()).toEqual([]);
     expect((await call(putRequest(g.reportId, "crash_txt", bytesOf(5000), g.token), NOW + 30)).status).toBe(201);
   });
 
-  it("answers a signed 500 storage_unavailable when R2 fails, charges nothing, and a retry succeeds", async () => {
+  it("answers a signed 500 internal_error when R2 fails, charges nothing, and a retry succeeds", async () => {
     const g = await newUploadDecision();
     const failing = withPut(async (_key, body) => {
       await body.cancel(new Error("R2 unavailable"));
@@ -238,7 +272,11 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
     });
     const res = await call(putRequest(g.reportId, "crash_txt", bytesOf(5000), g.token), NOW, failing);
     expect(res.status).toBe(500);
-    expect(await signedJson(res)).toMatchObject({ error: "storage_unavailable", report_id: g.reportId, name: "crash_txt" });
+    expect(await signedJson(res)).toMatchObject({
+      error: "internal_error",
+      report_id: g.reportId,
+      artifact: "crash_txt",
+    });
     expect(await byteCounters()).toEqual([]);
     const row = await env.DB.prepare("SELECT artifacts FROM reports WHERE report_id = ?1").bind(g.reportId).first();
     expect(row).toEqual({ artifacts: "{}" });
@@ -247,7 +285,7 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
   });
 
   it("undoes a stored piece and gives its charge back when another upload took the budget meanwhile", async () => {
-    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cap:global_artifact_bytes', '1000')").run();
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cap:global_artifact_bytes_per_day', '1000')").run();
     const g = await newUploadDecision();
     const racing = withPut(async (key, body, options) => {
       const object = await env.ARTIFACTS.put(key, body, options);
@@ -259,7 +297,11 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
     });
     const res = await call(putRequest(g.reportId, "crash_txt", bytesOf(600), g.token), NOW, racing);
     expect(res.status).toBe(429);
-    expect(await signedJson(res)).toMatchObject({ error: "rate_limited", report_id: g.reportId, name: "crash_txt" });
+    expect(await signedJson(res)).toMatchObject({
+      error: "rate_limited",
+      report_id: g.reportId,
+      artifact: "crash_txt",
+    });
     expect(await env.ARTIFACTS.head(`artifacts/${g.signature}/${g.reportId}/crash_txt.sealed`)).toBeNull();
     expect(await byteCounters()).toEqual([
       { scope: "bytes:global", n: 900 },
@@ -274,13 +316,13 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
     expect((await call(putRequest(g.reportId, "crash_log", bytesOf(100), g.token))).status).toBe(201);
     const again = await call(putRequest(g.reportId, "crash_log", bytesOf(100, 9), g.token));
     expect(again.status).toBe(409);
-    expect(await signedJson(again)).toMatchObject({ error: "exists", report_id: g.reportId, name: "crash_log" });
+    expect(await signedJson(again)).toMatchObject({ error: "exists", report_id: g.reportId, artifact: "crash_log" });
     const object = await env.ARTIFACTS.get(`artifacts/${g.signature}/${g.reportId}/crash_log.sealed`);
     expect(new Uint8Array(await object!.arrayBuffer())).toEqual(bytesOf(100));
   });
 
   it("enforces the per-installation and global daily byte caps with 429", async () => {
-    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cap:install_artifact_bytes', '1000')").run();
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cap:install_artifact_bytes_per_day', '1000')").run();
     const g = await newUploadDecision();
     expect((await call(putRequest(g.reportId, "crash_txt", bytesOf(600), g.token))).status).toBe(201);
     const refused = await call(putRequest(g.reportId, "crash_log", bytesOf(600), g.token));
@@ -289,15 +331,41 @@ describe("PUT /v1/reports/{id}/artifacts/{name}", () => {
       error: "rate_limited",
       retry_after_s: expect.any(Number),
       report_id: g.reportId,
-      name: "crash_log",
+      artifact: "crash_log",
     });
 
     // The refused attempt above did not consume the global budget: 600 used so far.
-    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cap:global_artifact_bytes', '1000')").run();
-    const other = await newUploadDecision({ features: { code: 8, frames: [] } });
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('cap:global_artifact_bytes_per_day', '1000')").run();
+    const other = await newUploadDecision({ features: haltFeatures({ code: 8, frames: [] }) });
     expect((await call(putRequest(other.reportId, "crash_txt", bytesOf(600), other.token))).status).toBe(429);
     const global = await env.DB.prepare("SELECT n FROM rate_counters WHERE scope = 'bytes:global'").first();
     expect(global).toEqual({ n: 600 });
+  });
+});
+
+describe("the kill switch on the piece routes", () => {
+  it("answers a signed 503 not_accepting to a PUT and to a complete", async () => {
+    const g = await newUploadDecision();
+    expect((await call(putRequest(g.reportId, "crash_txt", bytesOf(200), g.token))).status).toBe(201);
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO settings (key, value) VALUES ('accepting', 'false')"),
+      env.DB.prepare("INSERT INTO settings (key, value) VALUES ('disable_until_unix', ?1)").bind(String(NOW + 7200)),
+    ]);
+
+    const put = await call(putRequest(g.reportId, "crash_log", bytesOf(200), g.token));
+    expect(put.status).toBe(503);
+    expect(await signedJson(put)).toMatchObject({
+      error: "not_accepting",
+      disable_until_unix: NOW + 7200,
+      report_id: g.reportId,
+      artifact: "crash_log",
+    });
+    expect(await env.ARTIFACTS.head(`artifacts/${g.signature}/${g.reportId}/crash_log.sealed`)).toBeNull();
+
+    const done = await call(completeRequest(g.reportId, g.token, { v: 1, artifacts: ["crash_txt"] }));
+    expect(done.status).toBe(503);
+    expect(await signedJson(done)).toMatchObject({ error: "not_accepting", report_id: g.reportId });
+    expect(await signatureRow(g.signature)).toMatchObject({ sample_state: "leased" });
   });
 });
 
@@ -324,20 +392,20 @@ describe("POST /v1/reports/{id}/complete", () => {
     expect(report).toEqual({ completed_at: NOW + 60, sample_stored: 1 });
   });
 
-  it("accepts the piece list as objects with sizes too", async () => {
+  it("refuses a piece list that is not decision.v1#CompleteRequest", async () => {
     const g = await newUploadDecision();
     await uploadAll(g);
-    const artifacts = g.names.map((name) => ({ name, bytes: 200 }));
-    expect(await signedJson(await call(completeRequest(g.reportId, g.token, { v: 1, artifacts })))).toEqual({
-      v: 1,
-      report_id: g.reportId,
-      sample_stored: true,
-    });
+    // Names only: the contract has no room for objects, nor for an empty list.
+    for (const artifacts of [g.names.map((name) => ({ name, bytes: 200 })), [], ["crash_txt", "crash_txt"]]) {
+      const res = await call(completeRequest(g.reportId, g.token, { v: 1, artifacts }));
+      expect(res.status, JSON.stringify(artifacts)).toBe(400);
+      expect(await signedJson(res)).toMatchObject({ error: "invalid_payload", report_id: g.reportId });
+    }
   });
 
   it("binds each answer to its report, so one cannot be replayed for another", async () => {
     const a = await newUploadDecision();
-    const b = await newUploadDecision({ features: { code: 9, frames: [] } });
+    const b = await newUploadDecision({ features: haltFeatures({ code: 9, frames: [] }) });
     await uploadAll(a);
     await uploadAll(b);
     const doneA = await call(completeRequest(a.reportId, a.token, { v: 1, artifacts: a.names }));
@@ -350,14 +418,12 @@ describe("POST /v1/reports/{id}/complete", () => {
 
   it("answers 409 incomplete while a requested piece is missing", async () => {
     const g = await newUploadDecision();
-    await call(putRequest(g.reportId, "crash_txt", bytesOf(10), g.token));
+    await call(putRequest(g.reportId, "crash_txt", bytesOf(100), g.token));
     const res = await call(completeRequest(g.reportId, g.token, { v: 1, artifacts: ["crash_txt"] }));
     expect(res.status).toBe(409);
-    expect(await signedJson(res)).toMatchObject({
-      error: "incomplete",
-      report_id: g.reportId,
-      missing: ["crash_log", "boot_progress"],
-    });
+    const body = await signedJson(res);
+    expect(body).toMatchObject({ error: "incomplete", report_id: g.reportId });
+    expect(body.message).toContain("crash_log");
     expect(await signatureRow(g.signature)).toMatchObject({ sample_state: "leased" });
   });
 
@@ -369,7 +435,7 @@ describe("POST /v1/reports/{id}/complete", () => {
     expect(again.status).toBe(200);
     expect(await signedJson(again)).toEqual({ v: 1, report_id: g.reportId, sample_stored: true });
     await env.ARTIFACTS.delete(`artifacts/${g.signature}/${g.reportId}/crash_txt.sealed`);
-    const put = await call(putRequest(g.reportId, "crash_txt", bytesOf(10), g.token));
+    const put = await call(putRequest(g.reportId, "crash_txt", bytesOf(100), g.token));
     expect(put.status).toBe(409);
   });
 
@@ -387,11 +453,19 @@ describe("POST /v1/reports/{id}/complete", () => {
 
   it("refuses a bad token with 403 and a malformed body with 400", async () => {
     const g = await newUploadDecision();
-    const res = await call(completeRequest(g.reportId, null, { v: 1, artifacts: [] }));
+    const res = await call(completeRequest(g.reportId, null, { v: 1, artifacts: ["crash_txt"] }));
     expect(res.status).toBe(403);
-    expect(await signedJson(res)).toMatchObject({ error: "bad_token" });
-    const bad = await call(completeRequest(g.reportId, g.token, { v: 1, artifacts: ["dump"] }));
+    expect(await signedJson(res)).toMatchObject({ error: "bad_token", report_id: g.reportId });
+    const bad = await call(completeRequest(g.reportId, g.token, { v: 2, artifacts: ["crash_txt"] }));
     expect(bad.status).toBe(400);
     expect(await signedJson(bad)).toMatchObject({ error: "invalid_payload", report_id: g.reportId });
+  });
+
+  it("ignores a name that was never requested once every piece is stored", async () => {
+    const g = await newUploadDecision();
+    await uploadAll(g);
+    const done = await call(completeRequest(g.reportId, g.token, { v: 1, artifacts: [...g.names, "dump"] }));
+    expect(done.status).toBe(200);
+    expect(await signedJson(done)).toEqual({ v: 1, report_id: g.reportId, sample_stored: true });
   });
 });

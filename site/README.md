@@ -65,6 +65,13 @@ points; control characters are replaced by spaces before sending. Handled
 responses: 201 (shows the `B…` identifier), 400, 403 `turnstile`, other 403,
 429 with `retry_after_s`, 5xx, network failure or 20 s timeout.
 
+`test/contract.test.js` checks this against the contract itself with Ajv 2020
+(a test dependency, nothing is added to the page): the field bounds and the
+language list are the schema's, everything the form agrees to send validates
+against `bug.v1` — including values with control characters, emoji and the
+maximum lengths — and every error code of `admin.v1#ErrorBody` maps to a
+message that exists in both dictionaries.
+
 If `API_BASE` changes, update the `Content-Security-Policy` of `bug.html`
 (a test checks that they match).
 

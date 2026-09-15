@@ -4,7 +4,7 @@ import { eraseInstall } from "../src/admin";
 import { installHash } from "../src/crypto";
 import { StatementBudget } from "../src/maintenance";
 import { admin, adminRequest, sendClaim, sigOf } from "./admin-helpers";
-import { BUILD_ID, bugBody, haltClaim, installId } from "./fixtures";
+import { bugBody, BUILD_ID, haltClaim, haltFeatures, installId } from "./fixtures";
 import {
   NOW,
   bytesOf,
@@ -32,11 +32,7 @@ describe("POST /v1/admin/builds", () => {
     expect((await call(claimRequest(haltClaim()))).status).toBe(403);
     const res = await admin("POST", "/v1/admin/builds", { build_id: BUILD_ID, version: "0.1.0", channel: "test" });
     expect(res.status).toBe(201);
-    expect(res.body).toEqual({
-      v: 1,
-      created: true,
-      build: { build_id: BUILD_ID, version: "0.1.0", channel: "test", registered_at: NOW },
-    });
+    expect(res.body).toEqual({ v: 1, build_id: BUILD_ID, version: "0.1.0", channel: "test", registered_unix: NOW });
     expect((await call(claimRequest(haltClaim()))).status).toBe(200);
   });
 
@@ -46,8 +42,10 @@ describe("POST /v1/admin/builds", () => {
     expect(again.status).toBe(200);
     expect(again.body).toEqual({
       v: 1,
-      created: false,
-      build: { build_id: BUILD_ID, version: "0.1.0", channel: "release", registered_at: NOW },
+      build_id: BUILD_ID,
+      version: "0.1.0",
+      channel: "release",
+      registered_unix: NOW,
     });
   });
 
@@ -74,7 +72,7 @@ describe("DELETE /v1/admin/installs/{install_id}", () => {
 
     const res = await admin("DELETE", `/v1/admin/installs/${x}`);
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ v: 1, done: true, deleted_reports: 2, deleted_artifacts: 3 });
+    expect(res.body).toEqual({ v: 1, reports_deleted: 2, artifacts_deleted: 3 });
 
     const reports = await env.DB.prepare("SELECT report_id FROM reports").all();
     expect(reports.results).toEqual([{ report_id: kept.report_id }]);
@@ -135,34 +133,33 @@ describe("DELETE /v1/admin/installs/{install_id}", () => {
 
   it("answers 400 for a malformed id and zeros for an unknown installation", async () => {
     expect((await admin("DELETE", "/v1/admin/installs/NOT-AN-ID")).status).toBe(400);
-    expect((await admin("DELETE", `/v1/admin/installs/${installId()}`)).body).toEqual({
-      v: 1,
-      done: true,
-      deleted_reports: 0,
-      deleted_artifacts: 0,
+    expect(await admin("DELETE", `/v1/admin/installs/${installId()}`)).toEqual({
+      status: 200,
+      body: { v: 1, reports_deleted: 0, artifacts_deleted: 0 },
     });
   });
 
   it("works in bounded steps: a run out of statements is not done, and the next one finishes", async () => {
     await registerBuild();
     const x = installId();
-    for (const code of [1, 2, 3]) await storeSample(haltClaim({ install_id: x, features: { code, frames: [] } }));
+    for (const code of [1, 2, 3]) await storeSample(haltClaim({ install_id: x, features: haltFeatures({ code, frames: [] }) }));
     const hash = await installHash(env.INSTALL_HASH_KEY!, x);
 
     const partial = await eraseInstall(env, hash, new StatementBudget(7));
-    expect(partial).toEqual({ done: false, deleted_reports: 0, deleted_artifacts: 9 });
+    expect(partial).toEqual({ done: false, reports_deleted: 0, artifacts_deleted: 9 });
     // Rows stay until their pieces are known to be gone.
     const rows = await env.DB.prepare("SELECT COUNT(*) AS n FROM reports WHERE install_hash = ?1").bind(hash).first();
     expect(rows).toEqual({ n: 3 });
 
     const rest = await admin("DELETE", `/v1/admin/installs/${x}`);
-    expect(rest).toEqual({ status: 200, body: { v: 1, done: true, deleted_reports: 3, deleted_artifacts: 0 } });
+    // 202 with the same body would mean "call again"; this one finished.
+    expect(rest).toEqual({ status: 200, body: { v: 1, reports_deleted: 3, artifacts_deleted: 0 } });
     expect((await env.ARTIFACTS.list({ prefix: "artifacts/" })).objects).toHaveLength(0);
   });
 });
 
 describe("GET /v1/admin/stats", () => {
-  it("reports today's quota consumption, totals and settings", async () => {
+  it("reports today's quota consumption", async () => {
     await registerBuild();
     const decision = await sendClaim(haltClaim());
     await sendClaim(haltClaim());
@@ -179,22 +176,18 @@ describe("GET /v1/admin/stats", () => {
 
     const res = await admin("GET", "/v1/admin/stats");
     expect(res.status).toBe(200);
+    // admin.v1#Stats: day, kill switch and the four global counters.
     expect(res.body).toEqual({
       v: 1,
       day: "2026-09-13",
-      now: NOW,
-      database_bytes: expect.any(Number),
-      today: {
+      accepting: true,
+      usage: {
         claims: { used: 2, cap: 2000 },
         artifact_bytes: { used: 300, cap: 300 * 1024 * 1024 },
         new_signatures: { used: 1, cap: 200 },
         bugs: { used: 1, cap: 100 },
       },
-      totals: { signatures: 1, reports: 2, stored_samples: 0, bugs: 1, builds: 1 },
-      settings: expect.objectContaining({ accepting: true, disable_until_unix: null }),
     });
-    // D1 Free stops every write at 500 MB: the maintainer watches this.
-    expect(res.body.database_bytes).toBeGreaterThan(0);
     expect(JSON.stringify(res.body)).not.toContain("ip_salt");
   });
 });
@@ -205,11 +198,11 @@ describe("PUT /v1/admin/settings", () => {
     const off = await admin("PUT", "/v1/admin/settings", {
       accepting: false,
       disable_until_unix: NOW + 3600,
-      caps: { install_claims: 5 },
+      caps: { install_claims_per_day: 5 },
     });
     expect(off.status).toBe(200);
-    expect(off.body.settings).toMatchObject({ accepting: false, disable_until_unix: NOW + 3600 });
-    expect(off.body.settings.caps).toMatchObject({ install_claims: 5, ip_claims: 10 });
+    expect(off.body).toMatchObject({ accepting: false, disable_until_unix: NOW + 3600 });
+    expect(off.body.caps).toMatchObject({ install_claims_per_day: 5, ip_claims_per_day: 10 });
     expect(JSON.stringify(off.body)).not.toContain("salt");
 
     const refused = await call(claimRequest(haltClaim()));

@@ -160,6 +160,7 @@
   "privacy.server.title": "Ce que le service garde, et combien de temps",
   "privacy.server.host": "Le service de rapports fonctionne sur Cloudflare (Workers, base de données D1, stockage R2). Le mainteneur le consulte depuis son ordinateur, avec un jeton d’administration.",
   "privacy.server.dedup": "Pour chaque type d’erreur, le service tient un compteur d’occurrences, la liste des versions touchées et le nombre de consoles distinctes. Pour compter ces consoles, il calcule un pseudonyme à partir de l’identifiant d’installation (HMAC avec une clé secrète).",
+  "privacy.server.claim": "La fiche elle-même est conservée telle que la console l’a envoyée, identifiant d’installation compris, pour que le mainteneur puisse la relire en entier ; elle est supprimée au bout de 180 jours, ou dès que vous demandez l’effacement de vos données. Tout ce que le service en calcule — les compteurs, le nombre de consoles distinctes, les liens entre rapports — passe par le pseudonyme, jamais par l’identifiant.",
   "privacy.server.ip": "Votre adresse IP sert à limiter le nombre d’envois : le service n’en garde qu’une empreinte (HMAC avec un sel qui change chaque jour), jamais l’adresse en clair.",
   "privacy.retention.heading": "Durées de conservation",
   "privacy.retention.limits.term": "Compteurs anti-abus",

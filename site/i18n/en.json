@@ -160,6 +160,7 @@
   "privacy.server.title": "What the service keeps, and for how long",
   "privacy.server.host": "The report service runs on Cloudflare (Workers, D1 database, R2 storage). The maintainer reads it from their own computer with an admin token.",
   "privacy.server.dedup": "For each error type, the service keeps an occurrence counter, the list of affected versions and the number of distinct consoles. To count consoles, it derives a pseudonym from the installation ID (HMAC with a secret key).",
+  "privacy.server.claim": "The summary itself is kept as the console sent it, installation ID included, so the maintainer can read the whole of it; it is deleted after 180 days, or as soon as you ask for your data to be erased. Everything the service derives from it — the counters, the number of distinct consoles, the links between reports — uses the pseudonym, never the ID.",
   "privacy.server.ip": "Your IP address is used to limit how much can be sent: the service only keeps a fingerprint of it (HMAC with a salt that changes every day), never the address in clear.",
   "privacy.retention.heading": "Retention",
   "privacy.retention.limits.term": "Anti-abuse counters",
