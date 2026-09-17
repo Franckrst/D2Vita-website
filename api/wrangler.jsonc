@@ -1,0 +1,63 @@
+// D2Vita crash-report API — Cloudflare Worker configuration.
+//
+// database_id below are the real D1 database ids (account franck.rst@gmail.com,
+// created 2026-09-14). They are not secret, same as an account id — only
+// tokens and keys are. Local tests and `wrangler dev --local` do not need them.
+//
+// Secrets are NEVER written here. Set them with `wrangler secret put` (see
+// README.md): ADMIN_TOKEN_SHA256, UPLOAD_TOKEN_KEY, RESPONSE_SIGNING_KEY,
+// INSTALL_HASH_KEY, TURNSTILE_SECRET, and optionally TELEGRAM_BOT_TOKEN and
+// TELEGRAM_CHAT_ID.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "d2vita-crash",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-15",
+  "workers_dev": true,
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+  "vars": {
+    "ALLOWED_ORIGIN": "https://franckrst.github.io"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "d2vita_crash",
+      "database_id": "8c9aceca-b032-41a9-b025-c343a6072239",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARTIFACTS",
+      "bucket_name": "d2vita-crash-artifacts"
+    }
+  ],
+  "env": {
+    "staging": {
+      "name": "d2vita-crash-staging",
+      "workers_dev": true,
+      "triggers": {
+        "crons": ["0 3 * * *"]
+      },
+      "vars": {
+        "ALLOWED_ORIGIN": "https://franckrst.github.io"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "d2vita_crash_staging",
+          "database_id": "16984491-359c-437e-800a-a831c68c380c",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "ARTIFACTS",
+          "bucket_name": "d2vita-crash-artifacts-staging"
+        }
+      ]
+    }
+  }
+}
