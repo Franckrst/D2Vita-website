@@ -108,6 +108,13 @@ function withBadQuery(fn: () => Promise<Response>): Promise<Response> {
 
 type Row = Record<string, unknown>;
 
+// The VERSION part of a build_id (contract admin.v1#Version), e.g.
+// "0.1.3+c41b41abc61a" -> "0.1.3". Mirrors BuildCount.version in the Python
+// admin client (tools/crash/d2vcrash/api.py) — same split, same meaning.
+function versionOf(buildId: unknown): string | null {
+  return typeof buildId === "string" ? buildId.split("+", 1)[0]! : null;
+}
+
 // admin.v1#SignatureSummary: exactly these fields, no more (the local admin
 // tool checks what it receives against the contract).
 function signatureSummary(row: Row) {
@@ -124,6 +131,11 @@ function signatureSummary(row: Row) {
     fixed_in_version: row.fixed_in_version,
     merged_into: row.merged_into,
     issue_url: row.issue_url,
+    // row.last_build_id: present when the row comes from listSignatures's
+    // correlated subquery. signatureDetail overrides this field from its own
+    // builds[] (already fetched, ordered by last_seen) instead of paying for
+    // a second subquery.
+    last_version: versionOf(row.last_build_id),
   };
 }
 
@@ -166,7 +178,9 @@ export function listSignatures(request: Request, env: Env): Promise<Response> {
       where.push(`(${sort} < ?${k} OR (${sort} = ?${k} AND id > ?${id}))`);
     }
     const sql =
-      `SELECT * FROM signatures ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""} ` +
+      `SELECT *, (SELECT build_id FROM signature_builds WHERE signature = signatures.id ` +
+      `ORDER BY last_seen DESC LIMIT 1) AS last_build_id FROM signatures ` +
+      `${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""} ` +
       `ORDER BY ${sort} DESC, id ASC LIMIT ?${binds.push(limit + 1)}`;
     const { results } = await env.DB.prepare(sql).bind(...binds).all<Row>();
     const page = results.slice(0, limit);
@@ -199,15 +213,20 @@ export async function signatureDetail(db: D1Database, id: string) {
   const sample = sampleReport
     ? await db.prepare("SELECT artifacts FROM reports WHERE report_id = ?1").bind(sampleReport).first<{ artifacts: string }>()
     : null;
+  const buildRows = builds?.results ?? [];
   return {
     ...signatureSummary(row),
+    // row has no last_build_id here (plain SELECT *, no subquery): buildRows
+    // is already ordered by last_seen DESC, so its head is the same build the
+    // listSignatures subquery would have found.
+    last_version: versionOf(buildRows[0]?.build_id),
     rules_version: row.rules_version,
     note: row.note,
     sample_report: sampleReport,
     lease_report: row.lease_report,
     lease_expires_unix: row.lease_expires,
     sample_artifacts: storedArtifacts(sample?.artifacts),
-    builds: (builds?.results ?? []).map((b) => ({
+    builds: buildRows.map((b) => ({
       build_id: b.build_id,
       count: b.count,
       first_seen_unix: b.first_seen,

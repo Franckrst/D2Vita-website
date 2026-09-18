@@ -58,7 +58,7 @@
       "additionalProperties": false,
       "required": [
         "id", "kind", "canon", "status", "count", "installs", "first_seen_unix", "last_seen_unix",
-        "sample_state", "fixed_in_version", "merged_into", "issue_url"
+        "sample_state", "fixed_in_version", "merged_into", "issue_url", "last_version"
       ],
       "properties": {
         "id": { "$ref": "decision.v1.schema.json#/$defs/SignatureId" },
@@ -74,7 +74,11 @@
         "merged_into": {
           "anyOf": [{ "$ref": "decision.v1.schema.json#/$defs/SignatureId" }, { "type": "null" }]
         },
-        "issue_url": { "anyOf": [{ "$ref": "#/$defs/HttpsUrl" }, { "type": "null" }] }
+        "issue_url": { "anyOf": [{ "$ref": "#/$defs/HttpsUrl" }, { "type": "null" }] },
+        "last_version": {
+          "description": "VERSION part of the most recently seen build_id (null: no build recorded yet).",
+          "anyOf": [{ "$ref": "#/$defs/Version" }, { "type": "null" }]
+        }
       }
     },
     "SignatureList": {
@@ -94,7 +98,7 @@
       "additionalProperties": false,
       "required": [
         "v", "id", "kind", "canon", "status", "count", "installs", "first_seen_unix", "last_seen_unix",
-        "sample_state", "fixed_in_version", "merged_into", "issue_url", "rules_version", "note",
+        "sample_state", "fixed_in_version", "merged_into", "issue_url", "last_version", "rules_version", "note",
         "sample_report", "lease_report", "lease_expires_unix", "sample_artifacts", "builds", "recent_reports"
       ],
       "properties": {
@@ -113,6 +117,10 @@
           "anyOf": [{ "$ref": "decision.v1.schema.json#/$defs/SignatureId" }, { "type": "null" }]
         },
         "issue_url": { "anyOf": [{ "$ref": "#/$defs/HttpsUrl" }, { "type": "null" }] },
+        "last_version": {
+          "description": "VERSION part of the most recently seen build_id (null: no build recorded yet).",
+          "anyOf": [{ "$ref": "#/$defs/Version" }, { "type": "null" }]
+        },
         "rules_version": { "type": "integer", "minimum": 1 },
         "note": { "anyOf": [{ "$ref": "#/$defs/Note" }, { "type": "null" }] },
         "sample_report": {

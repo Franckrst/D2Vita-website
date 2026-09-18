@@ -74,6 +74,7 @@ describe("GET /v1/admin/signatures", () => {
       fixed_in_version: null,
       merged_into: null,
       issue_url: null,
+      last_version: "0.1.0",
     });
 
     const byLastSeen = await admin("GET", "/v1/admin/signatures?sort=last_seen");
@@ -122,6 +123,18 @@ describe("GET /v1/admin/signatures", () => {
     ).toEqual([a]);
   });
 
+  it("reports the most recently seen build's version, null with none", async () => {
+    const { a, c } = await seed();
+    const items = (await admin("GET", "/v1/admin/signatures?sort=count")).body.items;
+    // a: every claim on BUILD_ID (0.1.0+...) -> "0.1.0". c: BUILD_ID then
+    // OTHER_BUILD (0.2.0+...) more recently -> "0.2.0", not the first build.
+    expect(items.find((s: any) => s.id === a).last_version).toBe("0.1.0");
+    expect(items.find((s: any) => s.id === c).last_version).toBe("0.2.0");
+    await env.DB.prepare("DELETE FROM signature_builds WHERE signature = ?1").bind(a).run();
+    const noBuild = (await admin("GET", "/v1/admin/signatures?sort=count")).body.items.find((s: any) => s.id === a);
+    expect(noBuild.last_version).toBeNull();
+  });
+
   it.each(["status=closed", "kind=meteor", "sort=random", "limit=0", "limit=500", "cursor=%%%", "build=nope", "extra=1"])(
     "answers 400 for the invalid query %s",
     async (query) => {
@@ -138,7 +151,7 @@ describe("GET /v1/admin/signatures/{id}", () => {
     const res = await admin("GET", `/v1/admin/signatures/${c}`);
     expect(res.status).toBe(200);
     const s = res.body;
-    expect(s).toMatchObject({ id: c, count: 2, installs: 2, rules_version: 1, note: null });
+    expect(s).toMatchObject({ id: c, count: 2, installs: 2, rules_version: 1, note: null, last_version: "0.2.0" });
     expect(s.builds).toEqual([
       { build_id: OTHER_BUILD, count: 1, first_seen_unix: NOW + 50, last_seen_unix: NOW + 50 },
       { build_id: BUILD_ID, count: 1, first_seen_unix: NOW + 40, last_seen_unix: NOW + 40 },
