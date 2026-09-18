@@ -27,7 +27,14 @@ import { ARTIFACT_MAX_BYTES, type ArtifactName, type Channel, type Claim, type K
 import { validateClaim } from "./validate";
 
 export const CLAIM_MAX_BYTES = 16 * 1024;
-export const LEASE_SECONDS = 1800;
+// How long a sample slot stays leased to one report before the server offers
+// it again. Short on purpose: if that report's upload does not complete (a
+// frame-0 crash relaunches almost immediately, cutting the console's
+// background upload short), every other claim of the same signature is
+// answered count_only while the lease is held — so the shorter this is, the
+// sooner the sample is re-requested and the crash's logs actually arrive. Well
+// above the few seconds a small sealed sample needs to upload.
+export const LEASE_SECONDS = 300;
 
 // Pieces requested for each kind (spec section 4.5 "Envoyée pour").
 const WANTED: Record<Kind, readonly ArtifactName[]> = {

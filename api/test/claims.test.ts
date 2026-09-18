@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { LEASE_SECONDS } from "../src/claims";
 import { canon, signatureId } from "../src/signature";
 import type { Claim } from "../src/types";
 import { BUILD_ID, haltClaim, haltFeatures, hostFaultClaim, installId, ulid } from "./fixtures";
@@ -98,7 +99,7 @@ describe("POST /v1/claims: deduplication (spec section 5.4)", () => {
       action: "upload",
       upload: {
         token: expect.stringMatching(/^eyJyIjoi/),
-        expires_unix: NOW + 1800,
+        expires_unix: NOW + LEASE_SECONDS,
         artifacts: [
           { name: "crash_txt", max_bytes: 64 * KiB },
           { name: "crash_log", max_bytes: 64 * KiB },
@@ -119,7 +120,7 @@ describe("POST /v1/claims: deduplication (spec section 5.4)", () => {
       status: "open",
       sample_state: "leased",
       lease_report: claim.report_id,
-      lease_expires: NOW + 1800,
+      lease_expires: NOW + LEASE_SECONDS,
     });
     const perBuild = await env.DB.prepare("SELECT build_id, count FROM signature_builds WHERE signature = ?1")
       .bind(sig)
@@ -229,12 +230,12 @@ describe("POST /v1/claims: deduplication (spec section 5.4)", () => {
   it("hands the lease to the next report once it expired without complete", async () => {
     const first = haltClaim();
     await call(claimRequest(first));
-    const early = await signedJson(await call(claimRequest(haltClaim()), NOW + 1800));
+    const early = await signedJson(await call(claimRequest(haltClaim()), NOW + LEASE_SECONDS));
     expect(early.action).toBe("count_only");
     const late = haltClaim();
-    const decision = await signedJson(await call(claimRequest(late), NOW + 1801));
+    const decision = await signedJson(await call(claimRequest(late), NOW + LEASE_SECONDS + 1));
     expect(decision.action).toBe("upload");
-    expect(decision.upload.expires_unix).toBe(NOW + 1801 + 1800);
+    expect(decision.upload.expires_unix).toBe(NOW + LEASE_SECONDS + 1 + LEASE_SECONDS);
     expect(await signatureRow(decision.signature)).toMatchObject({ lease_report: late.report_id, count: 3 });
   });
 

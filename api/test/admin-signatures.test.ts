@@ -1,6 +1,7 @@
 import { createExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { LEASE_SECONDS } from "../src/claims";
 import { handle } from "../src/router";
 import { admin, adminRequest, sendClaim, sigOf } from "./admin-helpers";
 import { BUILD_ID, haltClaim, haltFeatures, hostFaultClaim, installId } from "./fixtures";
@@ -148,7 +149,7 @@ describe("GET /v1/admin/signatures/{id}", () => {
     // Nothing is stored yet: the lease is named apart from the sample.
     expect(s).toMatchObject({ sample_state: "leased", sample_report: null, sample_artifacts: [] });
     expect(s.lease_report).toBe(s.recent_reports[1].report_id);
-    expect(s.lease_expires_unix).toBe(NOW + 40 + 1800);
+    expect(s.lease_expires_unix).toBe(NOW + 40 + LEASE_SECONDS);
   });
 
   it("answers 404 for an unknown signature", async () => {
