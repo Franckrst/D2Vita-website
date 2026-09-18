@@ -29,7 +29,6 @@ export function json(body: Record<string, unknown>, status = 200, headers?: Head
 export const ERROR_STATUS = {
   invalid_payload: 400,
   unauthorized: 401,
-  unknown_build: 403,
   bad_token: 403,
   turnstile: 403,
   not_found: 404,

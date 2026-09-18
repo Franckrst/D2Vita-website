@@ -18,11 +18,18 @@ beforeEach(async () => {
 });
 
 describe("POST /v1/claims: refusals", () => {
-  it("refuses an unknown build with a signed 403 unknown_build bound to the report", async () => {
-    const claim = haltClaim({ build_id: "9.9.9+000000000000" });
+  it("accepts an unregistered build, as release regardless of the claim's channel", async () => {
+    // A public release must report without pre-registration. The self-reported
+    // channel:'dev' would earn raised caps if trusted — an unknown build must
+    // not get them, so it is recorded as 'release'.
+    const claim = haltClaim({ build_id: "9.9.9+000000000000", channel: "dev" });
     const res = await call(claimRequest(claim));
-    expect(res.status).toBe(403);
-    expect(await signedJson(res)).toMatchObject({ v: 1, error: "unknown_build", report_id: claim.report_id });
+    expect(res.status).toBe(200);
+    expect(await signedJson(res)).toMatchObject({ v: 1, report_id: claim.report_id });
+    const report = await env.DB.prepare("SELECT channel FROM reports WHERE report_id = ?1")
+      .bind(claim.report_id)
+      .first<{ channel: string }>();
+    expect(report?.channel).toBe("release");
   });
 
   it("refuses an invalid claim with a signed 400 invalid_payload", async () => {

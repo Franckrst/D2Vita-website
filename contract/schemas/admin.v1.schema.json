@@ -411,7 +411,6 @@
           "enum": [
             "invalid_payload",
             "unauthorized",
-            "unknown_build",
             "bad_token",
             "turnstile",
             "not_found",

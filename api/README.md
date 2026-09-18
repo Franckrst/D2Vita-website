@@ -126,7 +126,7 @@ with the thirteen codes of `admin.v1#ErrorBody` and their statuses, plus
 Console answers name the request they answer, so that a signed answer captured
 from one report cannot be replayed to a console waiting for another:
 `report_id` is in every decision, in every answer to a valid claim (400 header
-mismatch, 403 `unknown_build`, 429), and in every answer on a piece route whose
+mismatch, 429), and in every answer on a piece route whose
 path parameters are valid — with `artifact` (the piece name) in the errors of a
 PUT, and `name` in its 201. Answers to a request that names no valid report
 (an invalid claim, a malformed path, 413 or 503 before the claim is read) are
@@ -142,7 +142,7 @@ signed**, never the status or the other headers.
 
 | Method | Path | Answers |
 |---|---|---|
-| POST | `/v1/claims` | `200` decision · `400 invalid_payload` · `403 unknown_build` · `413` · `429 rate_limited` · `503 not_accepting` |
+| POST | `/v1/claims` | `200` decision · `400 invalid_payload` · `413` · `429 rate_limited` · `503 not_accepting` |
 | PUT | `/v1/reports/{report_id}/artifacts/{name}` | `201 {report_id, name, bytes}` and `X-D2V-SHA256` (**unsigned**, see below) · `400 invalid_payload` (bad path, body shorter/longer than declared or cut off, fewer than 88 bytes) · `403 bad_token` · `409 exists` · `413` · `429` · `500 internal_error` (R2 failed: retry later) · `503 not_accepting` |
 | POST | `/v1/reports/{report_id}/complete` | `200 {"report_id":…,"sample_stored":bool}` · `400 invalid_payload` · `403 bad_token` · `409 incomplete` · `503 not_accepting` |
 
@@ -274,7 +274,8 @@ the length of the sample lease).
   returns that column, not the version the running Worker uses. Design section
   5.3 versions the rules so that history can be reclassified knowingly: a bump
   of `RULES_VERSION` must not rewrite what older reports say.
-- Rate limits use the channel of the **registered** build, not the one claimed.
+- Rate limits use the channel of the **registered** build; an unregistered
+  build counts as `release` (strict public caps), never the channel it claims.
   Counters are consumed most specific first and stop at the first refusal.
 - `503` without an end date set by the admin answers `disable_until_unix = now + 24 h`.
 - A replay with the same `report_id` from another installation is a 400.
@@ -456,6 +457,8 @@ only (it is not stored in this repository or on GitHub). Do staging first.
    npx wrangler deploy --env staging   # https://d2vita-crash-staging.<subdomain>.workers.dev
    npx wrangler deploy                 # https://d2vita-crash.<subdomain>.workers.dev
    ```
-   Register builds with the local admin tool (`POST /v1/admin/builds`); the API
-   refuses claims from unregistered builds. Production tests must use a build
-   registered with `channel=test`, then erase what they created.
+   An unregistered build reports fine — its claims are accepted and counted as
+   `release`. Registering a build (`POST /v1/admin/builds`, via the local admin
+   tool) is only needed to grant it the raised `dev`/`test` caps. Production
+   tests that need those raised caps must register a build with `channel=test`,
+   then erase what they created.

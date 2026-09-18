@@ -102,7 +102,6 @@ export function matchesContract(ref: string, value: unknown): boolean {
 export const ERROR_STATUS: Record<string, number> = {
   invalid_payload: 400,
   unauthorized: 401,
-  unknown_build: 403,
   bad_token: 403,
   turnstile: 403,
   not_found: 404,

@@ -138,10 +138,24 @@ export async function handleClaim(request: Request, env: Env, ctx: ExecutionCont
   const headerError = consoleHeaderError(request, claim);
   if (headerError) return error("invalid_payload", headerError, bound);
 
-  const build = await env.DB.prepare("SELECT build_id, version, channel FROM builds WHERE build_id = ?1")
+  const registered = await env.DB.prepare("SELECT build_id, version, channel FROM builds WHERE build_id = ?1")
     .bind(claim.build_id)
     .first<BuildRow>();
-  if (!build) return error("unknown_build", "This build is not registered", bound);
+  // An unregistered build is ACCEPTED, not rejected. A public release must
+  // report without the maintainer having pre-registered its build_id — a
+  // forgotten registration used to 403 every report from the shipped VPK with
+  // unknown_build, and left the maintainer with nothing. An unknown build is
+  // treated as a 'release' build (strict public caps) whatever channel the
+  // claim self-reports, so no one can obtain the raised dev/test caps just by
+  // sending channel:'dev' with an unregistered build_id. Registration is now
+  // only ever needed to GRANT those raised caps to a build (dev/test builds
+  // are never distributed). version comes from the build_id, whose format the
+  // claim validator has already checked ("<version>+<hash>[-dirty]").
+  const build: BuildRow = registered ?? {
+    build_id: claim.build_id,
+    version: claim.build_id.split("+")[0]!,
+    channel: "release",
+  };
 
   const install = await installHash(requireSecret(env.INSTALL_HASH_KEY, "INSTALL_HASH_KEY"), claim.install_id);
 

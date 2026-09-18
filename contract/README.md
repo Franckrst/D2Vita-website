@@ -84,7 +84,7 @@ Errors use `admin.v1#ErrorBody` (codes below).
 
 | Method and path | Request | Success | Errors |
 |---|---|---|---|
-| `POST /v1/claims` | `claim.v1`, at most 16384 bytes | 200 `decision.v1` | 400 `invalid_payload`, 403 `unknown_build`, 413 `payload_too_large`, 429 `rate_limited`, 503 `not_accepting` |
+| `POST /v1/claims` | `claim.v1`, at most 16384 bytes | 200 `decision.v1` | 400 `invalid_payload`, 413 `payload_too_large`, 429 `rate_limited`, 503 `not_accepting` |
 | `PUT /v1/reports/{report_id}/artifacts/{name}` | sealed bytes (`sealed-format.md`), `Content-Length` required, at most `max_bytes` | 201 `decision.v1#ArtifactStored` | 400 `invalid_payload`, 403 `bad_token`, 409 `exists`, 413 `payload_too_large`, 429 `rate_limited`, 503 `not_accepting` |
 | `POST /v1/reports/{report_id}/complete` | `decision.v1#CompleteRequest` | 200 `decision.v1#CompleteResponse` | 400 `invalid_payload`, 403 `bad_token`, 409 `incomplete`, 503 `not_accepting` |
 
@@ -224,7 +224,6 @@ Every console request is safe to repeat.
 |---|---|---|
 | `invalid_payload` | 400 | Body is not JSON, or does not match its schema; bad path parameter; console header missing or different from the claim |
 | `unauthorized` | 401 | Admin route without the right bearer token |
-| `unknown_build` | 403 | Claim for a `build_id` that was never registered |
 | `bad_token` | 403 | Upload token missing, forged, expired, or artifact not requested |
 | `turnstile` | 403 | Turnstile verification of a bug report failed |
 | `not_found` | 404 | Unknown route or resource |

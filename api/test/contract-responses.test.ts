@@ -202,9 +202,8 @@ describe("admin answers", () => {
 });
 
 describe("error bodies", () => {
-  it("invalid_payload, unknown_build, payload_too_large and not_accepting on claims", async () => {
+  it("invalid_payload, payload_too_large and not_accepting on claims", async () => {
     await expectError("invalid_payload", await call(claimRequest(haltClaim({ kind: "meteor" }))));
-    await expectError("unknown_build", await call(claimRequest(haltClaim({ build_id: "9.9.9+000000000000" }))));
     await expectError(
       "payload_too_large",
       await call(claimRequest(haltClaim(), { headers: { "content-length": null } })),

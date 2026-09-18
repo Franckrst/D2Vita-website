@@ -28,8 +28,11 @@ afterEach(() => {
 });
 
 describe("POST /v1/admin/builds", () => {
-  it("registers a build, after which its claims are accepted", async () => {
-    expect((await call(claimRequest(haltClaim()))).status).toBe(403);
+  it("registers a build to set its channel (claims are accepted without it)", async () => {
+    // Registration is no longer a gate: an unregistered build already reports,
+    // treated as 'release'. Registering it as 'test' is what grants the raised
+    // prerelease caps.
+    expect((await call(claimRequest(haltClaim()))).status).toBe(200);
     const res = await admin("POST", "/v1/admin/builds", { build_id: BUILD_ID, version: "0.1.0", channel: "test" });
     expect(res.status).toBe(201);
     expect(res.body).toEqual({ v: 1, build_id: BUILD_ID, version: "0.1.0", channel: "test", registered_unix: NOW });
